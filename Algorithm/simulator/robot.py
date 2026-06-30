@@ -1,7 +1,11 @@
 import math
+from typing import TYPE_CHECKING
 
-from simulator.config import DEG_PER_FRAME, STEP_CM_PER_FRAME
+from simulator.config import CELL_CM, CELL_PX, DEG_PER_FRAME, ROBOT_H_CM, ROBOT_W_CM, STEP_CM_PER_FRAME
 from simulator.types import Command, RobotState
+
+if TYPE_CHECKING:
+    import pygame
 
 
 def move_forward(state: RobotState, cm: float) -> RobotState:
@@ -34,3 +38,32 @@ def step_command(
         advance = min(DEG_PER_FRAME, remaining)
         return rotate(state, advance, clockwise=True), remaining - advance
     return state, 0.0
+
+
+def draw_robot(surface: "pygame.Surface", state: RobotState) -> None:
+    import pygame
+    from simulator.arena import cm_to_px
+
+    w_px = int(ROBOT_W_CM * CELL_PX / CELL_CM)  # 80px
+    h_px = int(ROBOT_H_CM * CELL_PX / CELL_CM)  # 84px
+
+    robot_surf = pygame.Surface((w_px, h_px), pygame.SRCALPHA)
+    pygame.draw.rect(robot_surf, (30, 100, 200), (0, 0, w_px, h_px))
+
+    # Facing arrow: triangle pointing right (East = theta=0, the unrotated default)
+    arrow = [
+        (w_px, h_px // 2),
+        (w_px - 15, h_px // 2 - 10),
+        (w_px - 15, h_px // 2 + 10),
+    ]
+    pygame.draw.polygon(robot_surf, (255, 220, 0), arrow)
+
+    # pygame.transform.rotate is CCW in screen space; our theta is CCW from East;
+    # pygame's Y-flip means screen-CCW visually matches math-CCW convention.
+    rotated = pygame.transform.rotate(robot_surf, state.theta)
+
+    cx_cm = state.x + ROBOT_W_CM / 2
+    cy_cm = state.y + ROBOT_H_CM / 2
+    cx_px, cy_px = cm_to_px(cx_cm, cy_cm)
+    rect = rotated.get_rect(center=(cx_px, cy_px))
+    surface.blit(rotated, rect)
