@@ -15,8 +15,6 @@ def dubins_lsl(q1: RobotState, q2: RobotState, r: float) -> DubinsPath | None:
     tmp0 = dx + math.sin(alpha) - math.sin(beta)
     tmp1 = dy - math.cos(alpha) + math.cos(beta)
     p_sq = tmp0 ** 2 + tmp1 ** 2
-    if p_sq < 0:
-        return None
     p = math.sqrt(p_sq)
     theta = math.atan2(tmp1, tmp0)
     t = _mod2pi(theta - alpha)
@@ -32,8 +30,6 @@ def dubins_rsr(q1: RobotState, q2: RobotState, r: float) -> DubinsPath | None:
     tmp0 = dx - math.sin(alpha) + math.sin(beta)
     tmp1 = dy + math.cos(alpha) - math.cos(beta)
     p_sq = tmp0 ** 2 + tmp1 ** 2
-    if p_sq < 0:
-        return None
     p = math.sqrt(p_sq)
     theta = math.atan2(tmp1, tmp0)
     t = _mod2pi(alpha - theta)
@@ -52,7 +48,7 @@ def dubins_lsr(q1: RobotState, q2: RobotState, r: float) -> DubinsPath | None:
     if p_sq < 0:
         return None
     p = math.sqrt(p_sq)
-    theta = math.atan2(-math.cos(alpha) - math.cos(beta), tmp0) - math.atan2(-2, p)
+    theta = math.atan2(tmp1, tmp0) + math.atan2(2, p)
     t = _mod2pi(theta - alpha)
     q = _mod2pi(theta - beta)
     return DubinsPath('LSR', t * r, p * r, q * r, (t + p + q) * r)
@@ -69,7 +65,7 @@ def dubins_rsl(q1: RobotState, q2: RobotState, r: float) -> DubinsPath | None:
     if p_sq < 0:
         return None
     p = math.sqrt(p_sq)
-    theta = math.atan2(math.cos(alpha) + math.cos(beta), tmp0) - math.atan2(2, p)
+    theta = math.atan2(tmp1, tmp0) - math.atan2(2, p)
     t = _mod2pi(alpha - theta)
     q = _mod2pi(beta - theta)
     return DubinsPath('RSL', t * r, p * r, q * r, (t + p + q) * r)

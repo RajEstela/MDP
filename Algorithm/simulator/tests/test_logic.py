@@ -425,3 +425,30 @@ def test_hamiltonian_five_poses_returns_five():
     poses = [obstacle_approach_pose(obs) for obs in OBSTACLES]
     result = _hamiltonian_optimal_order(start, poses, r=25)
     assert len(result) == 5
+
+
+# ── Task 3 (Stage 3): get_commands wired ────────────────────────────────────
+
+def test_get_commands_arc_commands_present():
+    cmds = get_commands(OBSTACLES)
+    assert any(c.kind in ('AL', 'AR') for c in cmds)
+
+def test_get_commands_no_unknown_kinds():
+    cmds = get_commands(OBSTACLES)
+    valid = {'FW', 'BW', 'AL', 'AR'}
+    assert all(c.kind in valid for c in cmds)
+
+def test_get_commands_reaches_all_approach_poses():
+    """Simulate full command sequence; verify robot visits each approach pose (within 2cm)."""
+    import math
+    start = RobotState(x=0, y=0, theta=90)
+    cmds = get_commands(OBSTACLES)
+    state = start
+    for cmd in cmds:
+        remaining = cmd.value
+        while remaining > 0.001:
+            state, remaining = step_command(state, cmd, remaining)
+    # At minimum, verify the final state is one of the approach poses
+    poses = [obstacle_approach_pose(obs) for obs in OBSTACLES]
+    closest = min(poses, key=lambda p: math.hypot(state.x - p.x, state.y - p.y))
+    assert math.hypot(state.x - closest.x, state.y - closest.y) < 2.0

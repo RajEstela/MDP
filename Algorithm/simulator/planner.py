@@ -66,17 +66,13 @@ def dubins_to_commands(path: DubinsPath) -> list[Command]:
 
 
 def get_commands(obstacles: list[Obstacle]) -> list[Command]:
-    # Stage 2: Dubins paths through 3 hardcoded demo waypoints.
-    # Stage 3 replaces this with obstacle approach poses + Hamiltonian ordering.
-    waypoints = [
-        RobotState(x=100, y=100, theta=0),
-        RobotState(x=150, y=50,  theta=180),
-        RobotState(x=60,  y=160, theta=90),
-    ]
-    current = RobotState(x=0, y=0, theta=90)
+    start = RobotState(x=0, y=0, theta=90)
+    poses = [obstacle_approach_pose(obs) for obs in obstacles]
+    ordered = _hamiltonian_optimal_order(start, poses, TURN_RADIUS_CM)
+    current = start
     cmds: list[Command] = []
-    for wp in waypoints:
-        path = dubins_optimal(current, wp, TURN_RADIUS_CM)
+    for pose in ordered:
+        path = dubins_optimal(current, pose, TURN_RADIUS_CM)
         cmds += dubins_to_commands(path)
-        current = wp
+        current = pose
     return cmds

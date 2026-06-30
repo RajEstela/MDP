@@ -56,7 +56,7 @@ def step_command(
     if cmd.kind == 'AR':
         advance = min(STEP_CM_PER_FRAME, remaining)
         return arc_step(state, advance, clockwise=True, r=TURN_RADIUS_CM), remaining - advance
-    return state, 0.0
+    raise ValueError(f"Unknown command kind: {cmd.kind!r}")
 
 
 def draw_robot(surface: "pygame.Surface", state: RobotState) -> None:
