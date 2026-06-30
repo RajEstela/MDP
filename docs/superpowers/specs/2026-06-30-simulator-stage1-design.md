@@ -48,7 +48,7 @@ class RobotState:
     y: float      # cm
     theta: float  # degrees; 0=East, 90=North (standard math convention)
 ```
-Initial position: `x=20, y=20, theta=90` (centre of 40×40cm start zone, facing North).
+Initial position: `x=0, y=0, theta=90` (bottom-left corner of start zone, facing North).
 
 ### Obstacle (`arena.py` or shared dataclass)
 ```python

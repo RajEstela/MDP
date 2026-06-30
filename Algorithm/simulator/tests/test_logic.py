@@ -131,7 +131,7 @@ def test_get_commands_non_empty():
 
 def test_get_commands_all_valid_kinds():
     cmds = get_commands(OBSTACLES)
-    valid = {'FW', 'BW', 'TL', 'TR', 'AL', 'AR'}
+    valid = {'FW', 'BW', 'TL', 'TR', 'AL', 'AR', 'WAIT'}
     assert all(c.kind in valid for c in cmds)
 
 
@@ -285,7 +285,7 @@ def test_dubins_to_commands_skips_zero_segments():
 def test_get_commands_produces_arc_commands():
     cmds = get_commands(OBSTACLES)
     kinds = {c.kind for c in cmds}
-    assert kinds <= {'FW', 'BW', 'AL', 'AR'}
+    assert kinds <= {'FW', 'BW', 'AL', 'AR', 'WAIT'}
     assert 'AL' in kinds or 'AR' in kinds
 
 
@@ -436,7 +436,7 @@ def test_get_commands_arc_commands_present():
 
 def test_get_commands_no_unknown_kinds():
     cmds = get_commands(OBSTACLES)
-    valid = {'FW', 'BW', 'AL', 'AR'}
+    valid = {'FW', 'BW', 'AL', 'AR', 'WAIT'}
     assert all(c.kind in valid for c in cmds)
 
 def test_get_commands_reaches_final_approach_pose():

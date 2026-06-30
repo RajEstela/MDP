@@ -8,8 +8,8 @@ from simulator.types import Command, RobotState
 if TYPE_CHECKING:
     import pygame
 
-_ARROW_INSET_PX = 15  # arrow triangle depth in px
-_ARROW_HALF_PX = 10   # arrow triangle half-height in px
+_ARROW_INSET_PX = 22  # arrow triangle depth in px (scaled for 30 cm body)
+_ARROW_HALF_PX = 15   # arrow triangle half-height in px
 
 
 def move_forward(state: RobotState, cm: float) -> RobotState:
@@ -56,23 +56,26 @@ def step_command(
     if cmd.kind == 'AR':
         advance = min(STEP_CM_PER_FRAME, remaining)
         return arc_step(state, advance, clockwise=True, r=TURN_RADIUS_CM), remaining - advance
+    if cmd.kind == 'WAIT':
+        return state, remaining - 1.0
     raise ValueError(f"Unknown command kind: {cmd.kind!r}")
 
 
 def draw_robot(surface: "pygame.Surface", state: RobotState) -> None:
     import pygame
 
-    w_px = int(ROBOT_W_CM * CELL_PX / CELL_CM)  # 80px
-    h_px = int(ROBOT_H_CM * CELL_PX / CELL_CM)  # 84px
+    # Robot is square: 30 cm × 30 cm = 120 px × 120 px
+    size_px = int(ROBOT_W_CM * CELL_PX / CELL_CM)
 
-    robot_surf = pygame.Surface((w_px, h_px), pygame.SRCALPHA)
-    pygame.draw.rect(robot_surf, (30, 100, 200), (0, 0, w_px, h_px))
+    robot_surf = pygame.Surface((size_px, size_px), pygame.SRCALPHA)
+    pygame.draw.rect(robot_surf, (30, 100, 200), (0, 0, size_px, size_px))
 
-    # Facing arrow: triangle pointing right (East = theta=0, the unrotated default)
+    # Facing arrow: apex at the right-centre edge (East when theta=0).
+    # state.x, state.y tracks this apex — the front-centre of the robot.
     arrow = [
-        (w_px, h_px // 2),
-        (w_px - _ARROW_INSET_PX, h_px // 2 - _ARROW_HALF_PX),
-        (w_px - _ARROW_INSET_PX, h_px // 2 + _ARROW_HALF_PX),
+        (size_px, size_px // 2),
+        (size_px - _ARROW_INSET_PX, size_px // 2 - _ARROW_HALF_PX),
+        (size_px - _ARROW_INSET_PX, size_px // 2 + _ARROW_HALF_PX),
     ]
     pygame.draw.polygon(robot_surf, (255, 220, 0), arrow)
 
@@ -80,8 +83,12 @@ def draw_robot(surface: "pygame.Surface", state: RobotState) -> None:
     # pygame's Y-flip means screen-CCW visually matches math-CCW convention.
     rotated = pygame.transform.rotate(robot_surf, state.theta)
 
-    cx_cm = state.x + ROBOT_W_CM / 2
-    cy_cm = state.y + ROBOT_H_CM / 2
+    # The surface centre is the geometric centre of the robot body — 15 cm
+    # behind the apex along -theta. Place it there so the apex lands on state.x, state.y.
+    theta_rad = math.radians(state.theta)
+    half_cm = ROBOT_W_CM / 2   # 15 cm
+    cx_cm = state.x - half_cm * math.cos(theta_rad)
+    cy_cm = state.y - half_cm * math.sin(theta_rad)
     cx_px, cy_px = cm_to_px(cx_cm, cy_cm)
     rect = rotated.get_rect(center=(cx_px, cy_px))
     surface.blit(rotated, rect)
