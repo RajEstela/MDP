@@ -1,5 +1,6 @@
 from simulator.types import RobotState, Obstacle, Command
 from simulator.robot import move_forward, rotate, step_command
+from simulator.arena import cm_to_px
 
 
 def test_robotstate_fields():
@@ -88,9 +89,6 @@ def test_step_command_tl_increases_theta():
     cmd = Command(kind='TL', value=90.0)
     new_state, remaining = step_command(state, cmd, 90.0)
     assert new_state.theta > 90.0
-
-
-from simulator.arena import cm_to_px
 
 
 def test_cm_to_px_origin():
