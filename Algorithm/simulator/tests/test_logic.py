@@ -2,7 +2,7 @@ import math
 
 from simulator.arena import cm_to_px
 from simulator.dubins import dubins_lrl, dubins_lsl, dubins_lsr, dubins_optimal, dubins_rlr, dubins_rsl, dubins_rsr
-from simulator.planner import OBSTACLES, dubins_to_commands, get_commands
+from simulator.planner import OBSTACLES, dubins_to_commands, get_commands, obstacle_approach_pose
 from simulator.robot import arc_step, move_forward, rotate, step_command
 from simulator.types import Command, DubinsPath, Obstacle, RobotState
 
@@ -344,3 +344,49 @@ def test_dubins_lrl_endpoint():
     assert abs(state.x - q2.x) < 0.5, f"x off by {abs(state.x - q2.x):.3f} cm"
     assert abs(state.y - q2.y) < 0.5, f"y off by {abs(state.y - q2.y):.3f} cm"
     assert abs((state.theta - q2.theta + 180) % 360 - 180) < 1.0
+
+
+# ── Task 3: Stage 3 obstacle approach ──────────────────────────────────────
+
+
+def test_approach_pose_north():
+    obs = Obstacle(x=50, y=50, face='N')
+    pose = obstacle_approach_pose(obs)
+    assert abs(pose.x - 55) < 0.01
+    assert abs(pose.y - 80) < 0.01
+    assert abs(pose.theta - 270) < 0.01
+
+
+def test_approach_pose_south():
+    obs = Obstacle(x=50, y=50, face='S')
+    pose = obstacle_approach_pose(obs)
+    assert abs(pose.x - 55) < 0.01
+    assert abs(pose.y - 30) < 0.01
+    assert abs(pose.theta - 90) < 0.01
+
+
+def test_approach_pose_east():
+    obs = Obstacle(x=50, y=50, face='E')
+    pose = obstacle_approach_pose(obs)
+    assert abs(pose.x - 80) < 0.01
+    assert abs(pose.y - 55) < 0.01
+    assert abs(pose.theta - 180) < 0.01
+
+
+def test_approach_pose_west():
+    obs = Obstacle(x=50, y=50, face='W')
+    pose = obstacle_approach_pose(obs)
+    assert abs(pose.x - 30) < 0.01
+    assert abs(pose.y - 55) < 0.01
+    assert abs(pose.theta - 0) < 0.01
+
+
+def test_approach_pose_robot_faces_obstacle():
+    # Robot heading must point FROM robot position TOWARD the obstacle face.
+    # For face='E', robot is east of obstacle, theta=180 (facing West toward face). ✓
+    # Quick sanity: heading is 180° opposite to face direction.
+    face_to_heading = {'N': 270, 'S': 90, 'E': 180, 'W': 0}
+    for face, expected_theta in face_to_heading.items():
+        obs = Obstacle(x=50, y=50, face=face)
+        pose = obstacle_approach_pose(obs)
+        assert abs(pose.theta - expected_theta) < 0.01, f"face={face}: got theta={pose.theta}, expected {expected_theta}"

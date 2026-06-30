@@ -1,4 +1,4 @@
-from simulator.config import TURN_RADIUS_CM
+from simulator.config import APPROACH_CM, CELL_CM, TURN_RADIUS_CM
 from simulator.dubins import dubins_optimal
 from simulator.types import Command, DubinsPath, Obstacle, RobotState
 
@@ -18,6 +18,20 @@ _SEGMENT_KINDS: dict[str, tuple[str, str, str]] = {
     'LRL': ('AL', 'AR', 'AL'),
     'RLR': ('AR', 'AL', 'AR'),
 }
+
+
+def obstacle_approach_pose(obs: Obstacle) -> RobotState:
+    cx = obs.x + CELL_CM / 2
+    cy = obs.y + CELL_CM / 2
+    d = CELL_CM / 2 + APPROACH_CM
+    if obs.face == 'N':
+        return RobotState(x=cx, y=cy + d, theta=270)
+    if obs.face == 'S':
+        return RobotState(x=cx, y=cy - d, theta=90)
+    if obs.face == 'E':
+        return RobotState(x=cx + d, y=cy, theta=180)
+    # face == 'W'
+    return RobotState(x=cx - d, y=cy, theta=0)
 
 
 def dubins_to_commands(path: DubinsPath) -> list[Command]:

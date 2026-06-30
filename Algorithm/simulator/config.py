@@ -8,3 +8,4 @@ ROBOT_W_CM = 20
 ROBOT_H_CM = 21
 STEP_CM_PER_FRAME = 2.0
 DEG_PER_FRAME = 3.0
+APPROACH_CM = 20   # robot standoff from obstacle face surface, in cm
