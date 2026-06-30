@@ -438,8 +438,8 @@ def test_get_commands_no_unknown_kinds():
     valid = {'FW', 'BW', 'AL', 'AR'}
     assert all(c.kind in valid for c in cmds)
 
-def test_get_commands_reaches_all_approach_poses():
-    """Simulate full command sequence; verify robot visits each approach pose (within 2cm)."""
+def test_get_commands_reaches_final_approach_pose():
+    """Simulate full command sequence; verify robot ends near the last approach pose (within 2cm)."""
     import math
     start = RobotState(x=0, y=0, theta=90)
     cmds = get_commands(OBSTACLES)
@@ -452,3 +452,41 @@ def test_get_commands_reaches_all_approach_poses():
     poses = [obstacle_approach_pose(obs) for obs in OBSTACLES]
     closest = min(poses, key=lambda p: math.hypot(state.x - p.x, state.y - p.y))
     assert math.hypot(state.x - closest.x, state.y - closest.y) < 2.0
+
+
+# ── LSR/RSL endpoint validation ─────────────────────────────────────────────
+
+def test_dubins_lsr_endpoint():
+    """Verify LSR formula: simulate path and confirm we reach the target."""
+    q1 = RobotState(0, 0, 0)
+    q2 = RobotState(80, 0, 180)
+    r = 25
+    path = dubins_lsr(q1, q2, r)
+    assert path is not None, "LSR path should be feasible for these waypoints"
+    assert path.path_type == 'LSR'
+    state = q1
+    for cmd in dubins_to_commands(path):
+        remaining = cmd.value
+        while remaining > 0.001:
+            state, remaining = step_command(state, cmd, remaining)
+    assert abs(state.x - q2.x) < 0.5, f"x off by {abs(state.x - q2.x):.3f} cm"
+    assert abs(state.y - q2.y) < 0.5, f"y off by {abs(state.y - q2.y):.3f} cm"
+    assert abs((state.theta - q2.theta + 180) % 360 - 180) < 1.0
+
+
+def test_dubins_rsl_endpoint():
+    """Verify RSL formula: simulate path and confirm we reach the target."""
+    q1 = RobotState(0, 0, 180)
+    q2 = RobotState(80, 0, 0)
+    r = 25
+    path = dubins_rsl(q1, q2, r)
+    assert path is not None, "RSL path should be feasible for these waypoints"
+    assert path.path_type == 'RSL'
+    state = q1
+    for cmd in dubins_to_commands(path):
+        remaining = cmd.value
+        while remaining > 0.001:
+            state, remaining = step_command(state, cmd, remaining)
+    assert abs(state.x - q2.x) < 0.5, f"x off by {abs(state.x - q2.x):.3f} cm"
+    assert abs(state.y - q2.y) < 0.5, f"y off by {abs(state.y - q2.y):.3f} cm"
+    assert abs((state.theta - q2.theta + 180) % 360 - 180) < 1.0
