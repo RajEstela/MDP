@@ -2,7 +2,7 @@ import math
 from typing import TYPE_CHECKING
 
 from simulator.arena import cm_to_px
-from simulator.config import CELL_CM, CELL_PX, DEG_PER_FRAME, ROBOT_H_CM, ROBOT_W_CM, STEP_CM_PER_FRAME
+from simulator.config import CELL_CM, CELL_PX, DEG_PER_FRAME, ROBOT_H_CM, ROBOT_W_CM, STEP_CM_PER_FRAME, TURN_RADIUS_CM
 from simulator.types import Command, RobotState
 
 if TYPE_CHECKING:
@@ -26,6 +26,15 @@ def rotate(state: RobotState, deg: float, clockwise: bool) -> RobotState:
     return RobotState(x=state.x, y=state.y, theta=(state.theta + delta) % 360)
 
 
+def arc_step(state: RobotState, ds: float, clockwise: bool, r: float) -> RobotState:
+    sign = -1 if clockwise else 1
+    theta_rad = math.radians(state.theta)
+    new_theta_rad = theta_rad + sign * ds / r
+    new_x = state.x + sign * r * (math.sin(new_theta_rad) - math.sin(theta_rad))
+    new_y = state.y - sign * r * (math.cos(new_theta_rad) - math.cos(theta_rad))
+    return RobotState(x=new_x, y=new_y, theta=math.degrees(new_theta_rad) % 360)
+
+
 def step_command(
     state: RobotState, cmd: Command, remaining: float
 ) -> tuple[RobotState, float]:
@@ -41,6 +50,12 @@ def step_command(
     if cmd.kind == 'TR':
         advance = min(DEG_PER_FRAME, remaining)
         return rotate(state, advance, clockwise=True), remaining - advance
+    if cmd.kind == 'AL':
+        advance = min(STEP_CM_PER_FRAME, remaining)
+        return arc_step(state, advance, clockwise=False, r=TURN_RADIUS_CM), remaining - advance
+    if cmd.kind == 'AR':
+        advance = min(STEP_CM_PER_FRAME, remaining)
+        return arc_step(state, advance, clockwise=True, r=TURN_RADIUS_CM), remaining - advance
     return state, 0.0
 
 

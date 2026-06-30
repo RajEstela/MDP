@@ -1,6 +1,9 @@
-from simulator.types import RobotState, Obstacle, Command
-from simulator.robot import move_forward, rotate, step_command
+import math
+
 from simulator.arena import cm_to_px
+from simulator.planner import OBSTACLES, get_commands
+from simulator.robot import arc_step, move_forward, rotate, step_command
+from simulator.types import Command, DubinsPath, Obstacle, RobotState
 
 
 def test_robotstate_fields():
@@ -110,9 +113,6 @@ def test_cm_to_px_center():
     assert cm_to_px(100, 100) == (400, 400)
 
 
-from simulator.planner import OBSTACLES, get_commands
-
-
 def test_obstacles_count():
     assert len(OBSTACLES) == 5
 
@@ -136,3 +136,52 @@ def test_get_commands_all_valid_kinds():
 def test_get_commands_positive_values():
     cmds = get_commands(OBSTACLES)
     assert all(c.value > 0 for c in cmds)
+
+
+# ── Task 1: DubinsPath + arc_step ──────────────────────────────────────────
+
+def test_dubins_path_fields():
+    p = DubinsPath(path_type='LSL', seg1=10.0, seg2=20.0, seg3=30.0, total=60.0)
+    assert p.path_type == 'LSL'
+    assert p.seg1 == 10.0
+    assert p.total == 60.0
+
+
+def test_arc_step_left_quarter_circle():
+    state = RobotState(0, 0, 0)
+    result = arc_step(state, ds=math.pi / 2 * 25, clockwise=False, r=25)
+    assert abs(result.x - 25) < 0.01
+    assert abs(result.y - 25) < 0.01
+    assert abs(result.theta - 90) < 0.01
+
+
+def test_arc_step_right_quarter_circle():
+    state = RobotState(0, 0, 0)
+    result = arc_step(state, ds=math.pi / 2 * 25, clockwise=True, r=25)
+    assert abs(result.x - 25) < 0.01
+    assert abs(result.y + 25) < 0.01
+    assert abs(result.theta - 270) < 0.01
+
+
+def test_arc_step_full_circle_returns_to_origin():
+    state = RobotState(10, 20, 45)
+    result = arc_step(state, ds=2 * math.pi * 30, clockwise=False, r=30)
+    assert abs(result.x - 10) < 0.1
+    assert abs(result.y - 20) < 0.1
+    assert abs(result.theta - 45) < 0.1
+
+
+def test_step_command_al_arcs_left():
+    state = RobotState(0, 0, 0)
+    cmd = Command(kind='AL', value=math.pi / 2 * 25)
+    new_state, remaining = step_command(state, cmd, math.pi / 2 * 25)
+    assert remaining < math.pi / 2 * 25
+    assert new_state.y > 0
+
+
+def test_step_command_ar_arcs_right():
+    state = RobotState(0, 0, 0)
+    cmd = Command(kind='AR', value=math.pi / 2 * 25)
+    new_state, remaining = step_command(state, cmd, math.pi / 2 * 25)
+    assert remaining < math.pi / 2 * 25
+    assert new_state.y < 0
