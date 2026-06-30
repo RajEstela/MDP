@@ -2,7 +2,7 @@ import math
 
 from simulator.arena import cm_to_px
 from simulator.dubins import dubins_lrl, dubins_lsl, dubins_lsr, dubins_optimal, dubins_rlr, dubins_rsl, dubins_rsr
-from simulator.planner import OBSTACLES, get_commands
+from simulator.planner import OBSTACLES, dubins_to_commands, get_commands
 from simulator.robot import arc_step, move_forward, rotate, step_command
 from simulator.types import Command, DubinsPath, Obstacle, RobotState
 
@@ -130,7 +130,7 @@ def test_get_commands_non_empty():
 
 def test_get_commands_all_valid_kinds():
     cmds = get_commands(OBSTACLES)
-    valid = {'FW', 'BW', 'TL', 'TR'}
+    valid = {'FW', 'BW', 'TL', 'TR', 'AL', 'AR'}
     assert all(c.kind in valid for c in cmds)
 
 
@@ -238,3 +238,67 @@ def test_dubins_segments_non_negative():
     assert path.seg1 >= 0
     assert path.seg2 >= 0
     assert path.seg3 >= 0
+
+
+# ── Task 3: planner Stage 2 ────────────────────────────────────────────────
+
+def test_dubins_to_commands_lsl():
+    path = DubinsPath(path_type='LSL', seg1=30.0, seg2=50.0, seg3=20.0, total=100.0)
+    cmds = dubins_to_commands(path)
+    assert len(cmds) == 3
+    assert cmds[0].kind == 'AL'
+    assert cmds[1].kind == 'FW'
+    assert cmds[2].kind == 'AL'
+    assert abs(cmds[0].value - 30.0) < 0.001
+    assert abs(cmds[1].value - 50.0) < 0.001
+    assert abs(cmds[2].value - 20.0) < 0.001
+
+
+def test_dubins_to_commands_rsr():
+    path = DubinsPath(path_type='RSR', seg1=10.0, seg2=40.0, seg3=10.0, total=60.0)
+    cmds = dubins_to_commands(path)
+    assert cmds[0].kind == 'AR'
+    assert cmds[1].kind == 'FW'
+    assert cmds[2].kind == 'AR'
+
+
+def test_dubins_to_commands_lrl():
+    path = DubinsPath(path_type='LRL', seg1=15.0, seg2=25.0, seg3=15.0, total=55.0)
+    cmds = dubins_to_commands(path)
+    assert cmds[0].kind == 'AL'
+    assert cmds[1].kind == 'AR'
+    assert cmds[2].kind == 'AL'
+
+
+def test_dubins_to_commands_skips_zero_segments():
+    path = DubinsPath(path_type='LSL', seg1=30.0, seg2=0.0, seg3=20.0, total=50.0)
+    cmds = dubins_to_commands(path)
+    assert len(cmds) == 2
+    assert all(c.kind == 'AL' for c in cmds)
+
+
+def test_get_commands_produces_arc_commands():
+    cmds = get_commands(OBSTACLES)
+    kinds = {c.kind for c in cmds}
+    assert kinds <= {'FW', 'BW', 'AL', 'AR'}
+    assert 'AL' in kinds or 'AR' in kinds
+
+
+def test_get_commands_all_values_positive():
+    cmds = get_commands(OBSTACLES)
+    assert all(c.value > 0 for c in cmds)
+
+
+def test_dubins_path_reaches_target():
+    q1 = RobotState(0, 0, 90)
+    q2 = RobotState(100, 100, 0)
+    path = dubins_optimal(q1, q2, r=25)
+    cmds = dubins_to_commands(path)
+    state = q1
+    for cmd in cmds:
+        remaining = cmd.value
+        while remaining > 0.001:
+            state, remaining = step_command(state, cmd, remaining)
+    assert abs(state.x - q2.x) < 0.5
+    assert abs(state.y - q2.y) < 0.5
+    assert abs((state.theta - q2.theta + 180) % 360 - 180) < 1.0
