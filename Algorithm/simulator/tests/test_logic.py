@@ -1,6 +1,7 @@
 import math
 
 from simulator.arena import cm_to_px
+from simulator.dubins import dubins_lrl, dubins_lsl, dubins_lsr, dubins_optimal, dubins_rlr, dubins_rsl, dubins_rsr
 from simulator.planner import OBSTACLES, get_commands
 from simulator.robot import arc_step, move_forward, rotate, step_command
 from simulator.types import Command, DubinsPath, Obstacle, RobotState
@@ -185,3 +186,55 @@ def test_step_command_ar_arcs_right():
     new_state, remaining = step_command(state, cmd, math.pi / 2 * 25)
     assert remaining < math.pi / 2 * 25
     assert new_state.y < 0
+
+
+# ── Task 2: dubins.py ──────────────────────────────────────────────────────
+
+def test_dubins_straight_line():
+    # Same heading, target directly ahead — should be pure straight, ~zero arcs
+    q1 = RobotState(0, 0, 0)
+    q2 = RobotState(100, 0, 0)
+    path = dubins_optimal(q1, q2, r=25)
+    assert abs(path.total - 100) < 0.1
+
+
+def test_dubins_optimal_returns_shortest():
+    q1 = RobotState(0, 0, 0)
+    q2 = RobotState(50, 50, 90)
+    path = dubins_optimal(q1, q2, r=25)
+    for fn in [dubins_lsl, dubins_rsr, dubins_lsr, dubins_rsl, dubins_rlr, dubins_lrl]:
+        candidate = fn(q1, q2, r=25)
+        if candidate is not None:
+            assert path.total <= candidate.total + 0.001
+
+
+def test_dubins_lsl_same_start_end():
+    # Zero-displacement: all segments should be zero (or path total ~0)
+    q = RobotState(0, 0, 0)
+    path = dubins_lsl(q, q, r=25)
+    assert path is not None
+    assert path.total < 0.01
+
+
+def test_dubins_path_type_is_correct_string():
+    q1 = RobotState(0, 0, 0)
+    q2 = RobotState(50, 50, 90)
+    valid_types = {'LSL', 'LSR', 'RSL', 'RSR', 'RLR', 'LRL'}
+    path = dubins_optimal(q1, q2, r=25)
+    assert path.path_type in valid_types
+
+
+def test_dubins_total_equals_sum_of_segs():
+    q1 = RobotState(45, 0, 45)
+    q2 = RobotState(80, 60, 135)
+    path = dubins_optimal(q1, q2, r=25)
+    assert abs(path.total - (path.seg1 + path.seg2 + path.seg3)) < 0.001
+
+
+def test_dubins_segments_non_negative():
+    q1 = RobotState(10, 30, 180)
+    q2 = RobotState(90, 10, 270)
+    path = dubins_optimal(q1, q2, r=25)
+    assert path.seg1 >= 0
+    assert path.seg2 >= 0
+    assert path.seg3 >= 0
