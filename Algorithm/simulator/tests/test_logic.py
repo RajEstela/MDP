@@ -257,9 +257,13 @@ def test_dubins_to_commands_lsl():
 def test_dubins_to_commands_rsr():
     path = DubinsPath(path_type='RSR', seg1=10.0, seg2=40.0, seg3=10.0, total=60.0)
     cmds = dubins_to_commands(path)
+    assert len(cmds) == 3
     assert cmds[0].kind == 'AR'
     assert cmds[1].kind == 'FW'
     assert cmds[2].kind == 'AR'
+    assert abs(cmds[0].value - 10.0) < 0.001
+    assert abs(cmds[1].value - 40.0) < 0.001
+    assert abs(cmds[2].value - 10.0) < 0.001
 
 
 def test_dubins_to_commands_lrl():
