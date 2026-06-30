@@ -108,3 +108,31 @@ def test_cm_to_px_bottom_right():
 
 def test_cm_to_px_center():
     assert cm_to_px(100, 100) == (400, 400)
+
+
+from simulator.planner import OBSTACLES, get_commands
+
+
+def test_obstacles_count():
+    assert len(OBSTACLES) == 5
+
+
+def test_obstacles_valid_faces():
+    valid = {'N', 'S', 'E', 'W'}
+    assert all(o.face in valid for o in OBSTACLES)
+
+
+def test_get_commands_non_empty():
+    cmds = get_commands(OBSTACLES)
+    assert len(cmds) > 0
+
+
+def test_get_commands_all_valid_kinds():
+    cmds = get_commands(OBSTACLES)
+    valid = {'FW', 'BW', 'TL', 'TR'}
+    assert all(c.kind in valid for c in cmds)
+
+
+def test_get_commands_positive_values():
+    cmds = get_commands(OBSTACLES)
+    assert all(c.value > 0 for c in cmds)
