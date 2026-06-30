@@ -80,22 +80,20 @@ def dubins_rlr(q1: RobotState, q2: RobotState, r: float) -> DubinsPath | None:
     dy = (q2.y - q1.y) / r
     alpha = math.radians(q1.theta)
     beta = math.radians(q2.theta)
-    tmp0 = (
-        (dx - math.sin(alpha) + math.sin(beta)) / 6
-        + math.cos(alpha) / 3
-        - math.cos(beta) / 3
-    )
-    if abs(tmp0) > 1:
+    sa, ca = math.sin(alpha), math.cos(alpha)
+    sb, cb = math.sin(beta), math.cos(beta)
+    # Center-to-center vector between the two R (right/CW) turning circles
+    dx_c = dx - sa + sb
+    dy_c = dy + ca - cb
+    d_sq = dx_c ** 2 + dy_c ** 2
+    # Middle L circle exists iff centre-to-centre distance <= 4r (normalised: <= 4)
+    if d_sq > 16.0:
         return None
-    p = _mod2pi(2 * math.pi - math.acos(tmp0))
-    t = _mod2pi(
-        alpha
-        - math.atan2(
-            math.cos(alpha) - math.cos(beta),
-            dx - math.sin(alpha) + math.sin(beta),
-        )
-        + p / 2
-    )
+    # cos(p) = 1 - d_sq/8  (from law of cosines on the C1-M-C2 isoceles triangle)
+    tmp = 1.0 - d_sq / 8.0
+    tmp = max(-1.0, min(1.0, tmp))
+    p = _mod2pi(2 * math.pi - math.acos(tmp))
+    t = _mod2pi(alpha - math.atan2(dy_c, dx_c) + p / 2)
     q = _mod2pi(alpha - beta - t + p)
     return DubinsPath('RLR', t * r, p * r, q * r, (t + p + q) * r)
 
@@ -105,22 +103,20 @@ def dubins_lrl(q1: RobotState, q2: RobotState, r: float) -> DubinsPath | None:
     dy = (q2.y - q1.y) / r
     alpha = math.radians(q1.theta)
     beta = math.radians(q2.theta)
-    tmp0 = (
-        (dx + math.sin(alpha) - math.sin(beta)) / 6
-        - math.cos(alpha) / 3
-        + math.cos(beta) / 3
-    )
-    if abs(tmp0) > 1:
+    sa, ca = math.sin(alpha), math.cos(alpha)
+    sb, cb = math.sin(beta), math.cos(beta)
+    # Center-to-center vector between the two L (left/CCW) turning circles
+    dx_c = dx + sa - sb
+    dy_c = dy - ca + cb
+    d_sq = dx_c ** 2 + dy_c ** 2
+    # Middle R circle exists iff centre-to-centre distance <= 4r (normalised: <= 4)
+    if d_sq > 16.0:
         return None
-    p = _mod2pi(2 * math.pi - math.acos(tmp0))
-    t = _mod2pi(
-        -alpha
-        + math.atan2(
-            -math.cos(alpha) + math.cos(beta),
-            dx + math.sin(alpha) - math.sin(beta),
-        )
-        + p / 2
-    )
+    # cos(p) = 1 - d_sq/8  (from law of cosines on the C1-M-C2 isoceles triangle)
+    tmp = 1.0 - d_sq / 8.0
+    tmp = max(-1.0, min(1.0, tmp))
+    p = _mod2pi(2 * math.pi - math.acos(tmp))
+    t = _mod2pi(-alpha + math.atan2(dy_c, dx_c) + p / 2)
     q = _mod2pi(beta - alpha - t + p)
     return DubinsPath('LRL', t * r, p * r, q * r, (t + p + q) * r)
 
