@@ -310,46 +310,37 @@ def test_dubins_path_reaches_target():
 
 # ── RLR/LRL endpoint validation ─────────────────────────────────────────────
 
-def _simulate_path(q1: RobotState, q2: RobotState, r: float) -> RobotState:
-    """Simulate following the optimal Dubins path from q1 toward q2."""
-    path = dubins_optimal(q1, q2, r=r)
-    cmds = dubins_to_commands(path)
-    state = q1
-    for cmd in cmds:
-        remaining = cmd.value
-        while remaining > 0.001:
-            state, remaining = step_command(state, cmd, remaining)
-    return state
-
-
 def test_dubins_rlr_endpoint():
-    """Verify RLR path reaches target with correct position and heading."""
-    # q1=(0,0,315°) → q2=(30,0,135°), r=25 — this pair selects RLR as optimal
+    """Verify RLR formula: simulate path and confirm we reach the target."""
     q1 = RobotState(0, 0, 315)
     q2 = RobotState(30, 0, 135)
     r = 25
-    path = dubins_optimal(q1, q2, r=r)
-    # First verify this actually IS an RLR path (if it selects a different type, skip)
-    if path.path_type != 'RLR':
-        import pytest
-        pytest.skip(f"Expected RLR but got {path.path_type} — pick different waypoints")
-    state = _simulate_path(q1, q2, r)
+    path = dubins_rlr(q1, q2, r)
+    assert path is not None, "RLR path should be feasible for these waypoints"
+    assert path.path_type == 'RLR'
+    state = q1
+    for cmd in dubins_to_commands(path):
+        remaining = cmd.value
+        while remaining > 0.001:
+            state, remaining = step_command(state, cmd, remaining)
     assert abs(state.x - q2.x) < 0.5, f"x off by {abs(state.x - q2.x):.3f} cm"
     assert abs(state.y - q2.y) < 0.5, f"y off by {abs(state.y - q2.y):.3f} cm"
-    assert abs((state.theta - q2.theta + 180) % 360 - 180) < 1.0, f"theta off by {abs((state.theta - q2.theta + 180) % 360 - 180):.3f}°"
+    assert abs((state.theta - q2.theta + 180) % 360 - 180) < 1.0
 
 
 def test_dubins_lrl_endpoint():
-    """Verify LRL path reaches target with correct position and heading."""
-    # q1=(0,0,45°) → q2=(30,0,225°), r=25 — should select LRL
+    """Verify LRL formula: simulate path and confirm we reach the target."""
     q1 = RobotState(0, 0, 45)
     q2 = RobotState(30, 0, 225)
     r = 25
-    path = dubins_optimal(q1, q2, r=r)
-    if path.path_type != 'LRL':
-        import pytest
-        pytest.skip(f"Expected LRL but got {path.path_type} — pick different waypoints")
-    state = _simulate_path(q1, q2, r)
+    path = dubins_lrl(q1, q2, r)
+    assert path is not None, "LRL path should be feasible for these waypoints"
+    assert path.path_type == 'LRL'
+    state = q1
+    for cmd in dubins_to_commands(path):
+        remaining = cmd.value
+        while remaining > 0.001:
+            state, remaining = step_command(state, cmd, remaining)
     assert abs(state.x - q2.x) < 0.5, f"x off by {abs(state.x - q2.x):.3f} cm"
     assert abs(state.y - q2.y) < 0.5, f"y off by {abs(state.y - q2.y):.3f} cm"
-    assert abs((state.theta - q2.theta + 180) % 360 - 180) < 1.0, f"theta off by {abs((state.theta - q2.theta + 180) % 360 - 180):.3f}°"
+    assert abs((state.theta - q2.theta + 180) % 360 - 180) < 1.0
