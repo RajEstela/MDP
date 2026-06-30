@@ -2,6 +2,7 @@ import math
 
 from simulator.arena import cm_to_px
 from simulator.dubins import dubins_lrl, dubins_lsl, dubins_lsr, dubins_optimal, dubins_rlr, dubins_rsl, dubins_rsr
+from simulator.config import START_THETA, START_X_CM, START_Y_CM
 from simulator.planner import OBSTACLES, dubins_to_commands, get_commands, obstacle_approach_pose, _hamiltonian_optimal_order
 from simulator.robot import arc_step, move_forward, rotate, step_command
 from simulator.types import Command, DubinsPath, Obstacle, RobotState
@@ -441,7 +442,7 @@ def test_get_commands_no_unknown_kinds():
 def test_get_commands_reaches_final_approach_pose():
     """Simulate full command sequence; verify robot ends near the last approach pose (within 2cm)."""
     import math
-    start = RobotState(x=0, y=0, theta=90)
+    start = RobotState(x=START_X_CM, y=START_Y_CM, theta=START_THETA)
     cmds = get_commands(OBSTACLES)
     state = start
     for cmd in cmds:

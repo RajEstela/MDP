@@ -1,7 +1,7 @@
 import pygame
 
 from simulator.arena import draw_arena, draw_obstacles
-from simulator.config import ARENA_PX, FPS
+from simulator.config import ARENA_PX, FPS, START_THETA, START_X_CM, START_Y_CM
 from simulator.planner import OBSTACLES, get_commands
 from simulator.robot import draw_robot, step_command
 from simulator.types import RobotState
@@ -14,7 +14,7 @@ def main() -> None:
     clock = pygame.time.Clock()
 
     commands = get_commands(OBSTACLES)
-    start_pose = RobotState(x=0.0, y=0.0, theta=90.0)
+    start_pose = RobotState(x=START_X_CM, y=START_Y_CM, theta=START_THETA)
 
     state = RobotState(x=start_pose.x, y=start_pose.y, theta=start_pose.theta)
     queue: list = list(commands)
