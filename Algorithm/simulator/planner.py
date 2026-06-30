@@ -1,3 +1,5 @@
+import itertools
+
 from simulator.config import APPROACH_CM, CELL_CM, TURN_RADIUS_CM
 from simulator.dubins import dubins_optimal
 from simulator.types import Command, DubinsPath, Obstacle, RobotState
@@ -32,6 +34,26 @@ def obstacle_approach_pose(obs: Obstacle) -> RobotState:
         return RobotState(x=cx + d, y=cy, theta=180)
     # face == 'W'
     return RobotState(x=cx - d, y=cy, theta=0)
+
+
+def _total_dubins_length(start: RobotState, poses: list[RobotState], r: float) -> float:
+    total = 0.0
+    current = start
+    for pose in poses:
+        total += dubins_optimal(current, pose, r).total
+        current = pose
+    return total
+
+
+def _hamiltonian_optimal_order(start: RobotState, poses: list[RobotState], r: float) -> list[RobotState]:
+    best: list[RobotState] = []
+    best_len = float('inf')
+    for perm in itertools.permutations(poses):
+        length = _total_dubins_length(start, list(perm), r)
+        if length < best_len:
+            best_len = length
+            best = list(perm)
+    return best
 
 
 def dubins_to_commands(path: DubinsPath) -> list[Command]:

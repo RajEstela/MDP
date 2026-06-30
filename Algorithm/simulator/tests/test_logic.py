@@ -2,7 +2,7 @@ import math
 
 from simulator.arena import cm_to_px
 from simulator.dubins import dubins_lrl, dubins_lsl, dubins_lsr, dubins_optimal, dubins_rlr, dubins_rsl, dubins_rsr
-from simulator.planner import OBSTACLES, dubins_to_commands, get_commands, obstacle_approach_pose
+from simulator.planner import OBSTACLES, dubins_to_commands, get_commands, obstacle_approach_pose, _hamiltonian_optimal_order
 from simulator.robot import arc_step, move_forward, rotate, step_command
 from simulator.types import Command, DubinsPath, Obstacle, RobotState
 
@@ -390,3 +390,38 @@ def test_approach_pose_robot_faces_obstacle():
         obs = Obstacle(x=50, y=50, face=face)
         pose = obstacle_approach_pose(obs)
         assert abs(pose.theta - expected_theta) < 0.01, f"face={face}: got theta={pose.theta}, expected {expected_theta}"
+
+
+# ── Task 2 (Stage 3): _hamiltonian_optimal_order ────────────────────────────
+
+def test_hamiltonian_visits_all_poses():
+    start = RobotState(0, 0, 90)
+    poses = [RobotState(50, 0, 0), RobotState(100, 0, 0), RobotState(150, 0, 0)]
+    result = _hamiltonian_optimal_order(start, poses, r=25)
+    assert len(result) == 3
+    result_coords = {(p.x, p.y) for p in result}
+    expected_coords = {(p.x, p.y) for p in poses}
+    assert result_coords == expected_coords
+
+def test_hamiltonian_single_pose():
+    start = RobotState(0, 0, 90)
+    poses = [RobotState(50, 50, 0)]
+    result = _hamiltonian_optimal_order(start, poses, r=25)
+    assert len(result) == 1
+    assert result[0].x == 50 and result[0].y == 50
+
+def test_hamiltonian_selects_shorter_order():
+    # Start at (0,0,0). Pose B=(10,0,0) is close; Pose A=(100,0,0) is far.
+    # Visiting B first (0→10→100) is shorter total than A first (0→100→10→back).
+    # Both end at 0°, so the far→near order is always longer.
+    start = RobotState(0, 0, 0)
+    a = RobotState(100, 0, 0)
+    b = RobotState(10, 0, 0)
+    result = _hamiltonian_optimal_order(start, [a, b], r=25)
+    assert result[0].x == b.x
+
+def test_hamiltonian_five_poses_returns_five():
+    start = RobotState(0, 0, 90)
+    poses = [obstacle_approach_pose(obs) for obs in OBSTACLES]
+    result = _hamiltonian_optimal_order(start, poses, r=25)
+    assert len(result) == 5
