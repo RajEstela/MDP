@@ -88,3 +88,25 @@ def test_step_command_tl_increases_theta():
     cmd = Command(kind='TL', value=90.0)
     new_state, remaining = step_command(state, cmd, 90.0)
     assert new_state.theta > 90.0
+
+
+from simulator.arena import cm_to_px
+
+
+def test_cm_to_px_origin():
+    # Bottom-left of arena (0cm, 0cm) → pygame bottom-left = (0, 800)
+    assert cm_to_px(0, 0) == (0, 800)
+
+
+def test_cm_to_px_top_left():
+    # Top-left of arena (0cm, 200cm) → pygame top-left = (0, 0)
+    assert cm_to_px(0, 200) == (0, 0)
+
+
+def test_cm_to_px_bottom_right():
+    # Bottom-right of arena (200cm, 0cm) → pygame bottom-right = (800, 800)
+    assert cm_to_px(200, 0) == (800, 800)
+
+
+def test_cm_to_px_center():
+    assert cm_to_px(100, 100) == (400, 400)
