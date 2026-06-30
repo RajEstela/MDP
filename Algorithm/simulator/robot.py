@@ -1,11 +1,15 @@
 import math
 from typing import TYPE_CHECKING
 
+from simulator.arena import cm_to_px
 from simulator.config import CELL_CM, CELL_PX, DEG_PER_FRAME, ROBOT_H_CM, ROBOT_W_CM, STEP_CM_PER_FRAME
 from simulator.types import Command, RobotState
 
 if TYPE_CHECKING:
     import pygame
+
+_ARROW_INSET_PX = 15  # arrow triangle depth in px
+_ARROW_HALF_PX = 10   # arrow triangle half-height in px
 
 
 def move_forward(state: RobotState, cm: float) -> RobotState:
@@ -42,7 +46,6 @@ def step_command(
 
 def draw_robot(surface: "pygame.Surface", state: RobotState) -> None:
     import pygame
-    from simulator.arena import cm_to_px
 
     w_px = int(ROBOT_W_CM * CELL_PX / CELL_CM)  # 80px
     h_px = int(ROBOT_H_CM * CELL_PX / CELL_CM)  # 84px
@@ -53,8 +56,8 @@ def draw_robot(surface: "pygame.Surface", state: RobotState) -> None:
     # Facing arrow: triangle pointing right (East = theta=0, the unrotated default)
     arrow = [
         (w_px, h_px // 2),
-        (w_px - 15, h_px // 2 - 10),
-        (w_px - 15, h_px // 2 + 10),
+        (w_px - _ARROW_INSET_PX, h_px // 2 - _ARROW_HALF_PX),
+        (w_px - _ARROW_INSET_PX, h_px // 2 + _ARROW_HALF_PX),
     ]
     pygame.draw.polygon(robot_surf, (255, 220, 0), arrow)
 

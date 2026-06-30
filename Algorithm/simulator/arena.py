@@ -22,7 +22,7 @@ def draw_arena(surface: "pygame.Surface") -> None:
         pygame.draw.line(surface, (60, 60, 60), (pos, 0), (pos, ARENA_PX))
         pygame.draw.line(surface, (60, 60, 60), (0, pos), (ARENA_PX, pos))
     # Start zone: 40×40cm = 4×4 cells, bottom-left of arena
-    _, top_py = cm_to_px(0, 40)
+    _, top_py = cm_to_px(0, 4 * CELL_CM)
     start_size = 4 * CELL_PX
     start_surf = pygame.Surface((start_size, start_size), pygame.SRCALPHA)
     start_surf.fill((0, 180, 0, 80))
