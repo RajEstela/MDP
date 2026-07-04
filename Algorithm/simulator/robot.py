@@ -2,7 +2,7 @@ import math
 from typing import TYPE_CHECKING
 
 from simulator.arena import cm_to_px
-from simulator.config import CELL_CM, CELL_PX, DEG_PER_FRAME, ROBOT_H_CM, ROBOT_W_CM, STEP_CM_PER_FRAME, TURN_RADIUS_CM
+from simulator.config import CELL_CM, CELL_PX, DEG_PER_FRAME, ROBOT_W_CM, STEP_CM_PER_FRAME
 from simulator.types import Command, RobotState
 
 if TYPE_CHECKING:
@@ -44,18 +44,12 @@ def step_command(
     if cmd.kind == 'BW':
         advance = min(STEP_CM_PER_FRAME, remaining)
         return move_forward(state, -advance), remaining - advance
-    if cmd.kind == 'TL':
+    if cmd.kind == 'RL':
         advance = min(DEG_PER_FRAME, remaining)
         return rotate(state, advance, clockwise=False), remaining - advance
-    if cmd.kind == 'TR':
+    if cmd.kind == 'RR':
         advance = min(DEG_PER_FRAME, remaining)
         return rotate(state, advance, clockwise=True), remaining - advance
-    if cmd.kind == 'AL':
-        advance = min(STEP_CM_PER_FRAME, remaining)
-        return arc_step(state, advance, clockwise=False, r=TURN_RADIUS_CM), remaining - advance
-    if cmd.kind == 'AR':
-        advance = min(STEP_CM_PER_FRAME, remaining)
-        return arc_step(state, advance, clockwise=True, r=TURN_RADIUS_CM), remaining - advance
     if cmd.kind == 'WAIT':
         return state, remaining - 1.0
     raise ValueError(f"Unknown command kind: {cmd.kind!r}")

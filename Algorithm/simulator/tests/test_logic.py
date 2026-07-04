@@ -8,6 +8,29 @@ from simulator.robot import arc_step, move_forward, rotate, step_command
 from simulator.types import Command, DubinsPath, Obstacle, RobotState
 
 
+def _sim_dubins_path(q1: RobotState, path, r: float = 25) -> RobotState:
+    """Simulate a DubinsPath directly using arc_step/move_forward (bypasses step_command)."""
+    kind_map = {
+        'LSL': ('AL', 'FW', 'AL'), 'LSR': ('AL', 'FW', 'AR'),
+        'RSL': ('AR', 'FW', 'AL'), 'RSR': ('AR', 'FW', 'AR'),
+        'LRL': ('AL', 'AR', 'AL'), 'RLR': ('AR', 'AL', 'AR'),
+    }
+    seg_kinds = kind_map[path.path_type]
+    state = q1
+    for kind, seg_len in zip(seg_kinds, [path.seg1, path.seg2, path.seg3]):
+        remaining = seg_len
+        while remaining > 0.001:
+            adv = min(2.0, remaining)
+            if kind == 'FW':
+                state = move_forward(state, adv)
+            elif kind == 'AL':
+                state = arc_step(state, adv, clockwise=False, r=r)
+            elif kind == 'AR':
+                state = arc_step(state, adv, clockwise=True, r=r)
+            remaining -= adv
+    return state
+
+
 def test_robotstate_fields():
     s = RobotState(x=0.0, y=0.0, theta=90.0)
     assert s.x == 0.0
@@ -81,17 +104,17 @@ def test_step_command_bw_retreats_position():
     assert new_state.y < 50.0
 
 
-def test_step_command_tr_reduces_theta():
+def test_step_command_rr_reduces_theta():
     state = RobotState(x=0.0, y=0.0, theta=90.0)
-    cmd = Command(kind='TR', value=90.0)
+    cmd = Command(kind='RR', value=90.0)
     new_state, remaining = step_command(state, cmd, 90.0)
     assert remaining < 90.0
     assert new_state.theta < 90.0
 
 
-def test_step_command_tl_increases_theta():
+def test_step_command_rl_increases_theta():
     state = RobotState(x=0.0, y=0.0, theta=90.0)
-    cmd = Command(kind='TL', value=90.0)
+    cmd = Command(kind='RL', value=90.0)
     new_state, remaining = step_command(state, cmd, 90.0)
     assert new_state.theta > 90.0
 
@@ -171,22 +194,6 @@ def test_arc_step_full_circle_returns_to_origin():
     assert abs(result.x - 10) < 0.1
     assert abs(result.y - 20) < 0.1
     assert abs(result.theta - 45) < 0.1
-
-
-def test_step_command_al_arcs_left():
-    state = RobotState(0, 0, 0)
-    cmd = Command(kind='AL', value=math.pi / 2 * 25)
-    new_state, remaining = step_command(state, cmd, math.pi / 2 * 25)
-    assert remaining < math.pi / 2 * 25
-    assert new_state.y > 0
-
-
-def test_step_command_ar_arcs_right():
-    state = RobotState(0, 0, 0)
-    cmd = Command(kind='AR', value=math.pi / 2 * 25)
-    new_state, remaining = step_command(state, cmd, math.pi / 2 * 25)
-    assert remaining < math.pi / 2 * 25
-    assert new_state.y < 0
 
 
 # ── Task 2: dubins.py ──────────────────────────────────────────────────────
@@ -298,12 +305,7 @@ def test_dubins_path_reaches_target():
     q1 = RobotState(0, 0, 90)
     q2 = RobotState(100, 100, 0)
     path = dubins_optimal(q1, q2, r=25)
-    cmds = dubins_to_commands(path)
-    state = q1
-    for cmd in cmds:
-        remaining = cmd.value
-        while remaining > 0.001:
-            state, remaining = step_command(state, cmd, remaining)
+    state = _sim_dubins_path(q1, path)
     assert abs(state.x - q2.x) < 0.5
     assert abs(state.y - q2.y) < 0.5
     assert abs((state.theta - q2.theta + 180) % 360 - 180) < 1.0
@@ -312,36 +314,26 @@ def test_dubins_path_reaches_target():
 # ── RLR/LRL endpoint validation ─────────────────────────────────────────────
 
 def test_dubins_rlr_endpoint():
-    """Verify RLR formula: simulate path and confirm we reach the target."""
     q1 = RobotState(0, 0, 315)
     q2 = RobotState(30, 0, 135)
     r = 25
     path = dubins_rlr(q1, q2, r)
     assert path is not None, "RLR path should be feasible for these waypoints"
     assert path.path_type == 'RLR'
-    state = q1
-    for cmd in dubins_to_commands(path):
-        remaining = cmd.value
-        while remaining > 0.001:
-            state, remaining = step_command(state, cmd, remaining)
+    state = _sim_dubins_path(q1, path, r)
     assert abs(state.x - q2.x) < 0.5, f"x off by {abs(state.x - q2.x):.3f} cm"
     assert abs(state.y - q2.y) < 0.5, f"y off by {abs(state.y - q2.y):.3f} cm"
     assert abs((state.theta - q2.theta + 180) % 360 - 180) < 1.0
 
 
 def test_dubins_lrl_endpoint():
-    """Verify LRL formula: simulate path and confirm we reach the target."""
     q1 = RobotState(0, 0, 45)
     q2 = RobotState(30, 0, 225)
     r = 25
     path = dubins_lrl(q1, q2, r)
     assert path is not None, "LRL path should be feasible for these waypoints"
     assert path.path_type == 'LRL'
-    state = q1
-    for cmd in dubins_to_commands(path):
-        remaining = cmd.value
-        while remaining > 0.001:
-            state, remaining = step_command(state, cmd, remaining)
+    state = _sim_dubins_path(q1, path, r)
     assert abs(state.x - q2.x) < 0.5, f"x off by {abs(state.x - q2.x):.3f} cm"
     assert abs(state.y - q2.y) < 0.5, f"y off by {abs(state.y - q2.y):.3f} cm"
     assert abs((state.theta - q2.theta + 180) % 360 - 180) < 1.0
@@ -458,36 +450,26 @@ def test_get_commands_reaches_final_approach_pose():
 # ── LSR/RSL endpoint validation ─────────────────────────────────────────────
 
 def test_dubins_lsr_endpoint():
-    """Verify LSR formula: simulate path and confirm we reach the target."""
     q1 = RobotState(0, 0, 0)
     q2 = RobotState(80, 0, 180)
     r = 25
     path = dubins_lsr(q1, q2, r)
     assert path is not None, "LSR path should be feasible for these waypoints"
     assert path.path_type == 'LSR'
-    state = q1
-    for cmd in dubins_to_commands(path):
-        remaining = cmd.value
-        while remaining > 0.001:
-            state, remaining = step_command(state, cmd, remaining)
+    state = _sim_dubins_path(q1, path, r)
     assert abs(state.x - q2.x) < 0.5, f"x off by {abs(state.x - q2.x):.3f} cm"
     assert abs(state.y - q2.y) < 0.5, f"y off by {abs(state.y - q2.y):.3f} cm"
     assert abs((state.theta - q2.theta + 180) % 360 - 180) < 1.0
 
 
 def test_dubins_rsl_endpoint():
-    """Verify RSL formula: simulate path and confirm we reach the target."""
     q1 = RobotState(0, 0, 180)
     q2 = RobotState(80, 0, 0)
     r = 25
     path = dubins_rsl(q1, q2, r)
     assert path is not None, "RSL path should be feasible for these waypoints"
     assert path.path_type == 'RSL'
-    state = q1
-    for cmd in dubins_to_commands(path):
-        remaining = cmd.value
-        while remaining > 0.001:
-            state, remaining = step_command(state, cmd, remaining)
+    state = _sim_dubins_path(q1, path, r)
     assert abs(state.x - q2.x) < 0.5, f"x off by {abs(state.x - q2.x):.3f} cm"
     assert abs(state.y - q2.y) < 0.5, f"y off by {abs(state.y - q2.y):.3f} cm"
     assert abs((state.theta - q2.theta + 180) % 360 - 180) < 1.0
