@@ -81,6 +81,12 @@ _ROBOT_CLEARANCE = 20.0          # cm clearance from every obstacle cell edge
 _BACKUP_DISTANCES = (25, 40, 60, 80)  # cm to try reversing before forward Dubins
 
 
+def _angle_diff(from_deg: float, to_deg: float) -> float:
+    """Signed shortest angular difference. Positive = left (RL), negative = right (RR)."""
+    diff = (to_deg - from_deg + 180) % 360 - 180
+    return diff if diff != -180 else 180
+
+
 def obstacle_approach_pose(obs: Obstacle) -> RobotState:
     cx = obs.x + CELL_CM / 2
     cy = obs.y + CELL_CM / 2

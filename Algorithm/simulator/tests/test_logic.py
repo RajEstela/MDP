@@ -3,7 +3,7 @@ import math
 from simulator.arena import cm_to_px
 from simulator.dubins import dubins_lrl, dubins_lsl, dubins_lsr, dubins_optimal, dubins_rlr, dubins_rsl, dubins_rsr
 from simulator.config import START_THETA, START_X_CM, START_Y_CM
-from simulator.planner import OBSTACLES, dubins_to_commands, get_commands, obstacle_approach_pose, _hamiltonian_optimal_order
+from simulator.planner import OBSTACLES, dubins_to_commands, get_commands, obstacle_approach_pose, _hamiltonian_optimal_order, _angle_diff
 from simulator.robot import arc_step, move_forward, rotate, step_command
 from simulator.types import Command, DubinsPath, Obstacle, RobotState
 
@@ -473,3 +473,27 @@ def test_dubins_rsl_endpoint():
     assert abs(state.x - q2.x) < 0.5, f"x off by {abs(state.x - q2.x):.3f} cm"
     assert abs(state.y - q2.y) < 0.5, f"y off by {abs(state.y - q2.y):.3f} cm"
     assert abs((state.theta - q2.theta + 180) % 360 - 180) < 1.0
+
+
+# ── Stage 4: _angle_diff ────────────────────────────────────────────────────
+
+def test_angle_diff_same_heading():
+    assert _angle_diff(90, 90) == 0.0
+
+def test_angle_diff_left_90():
+    assert abs(_angle_diff(0, 90) - 90) < 0.01
+
+def test_angle_diff_right_90():
+    assert abs(_angle_diff(90, 0) - (-90)) < 0.01
+
+def test_angle_diff_shortest_right():
+    # 10° to 350°: going right 20° is shorter than going left 340°
+    assert abs(_angle_diff(10, 350) - (-20)) < 0.01
+
+def test_angle_diff_shortest_left():
+    # 350° to 10°: going left 20° is shorter than going right 340°
+    assert abs(_angle_diff(350, 10) - 20) < 0.01
+
+def test_angle_diff_exactly_180():
+    # Exactly 180° away returns +180 (left)
+    assert abs(_angle_diff(0, 180) - 180) < 0.01
