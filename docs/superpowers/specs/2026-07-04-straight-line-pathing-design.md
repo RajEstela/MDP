@@ -72,6 +72,18 @@ If the direct `FW` segment hits an obstacle, generate **8 bypass candidate point
 - 4 corners: NE, NW, SE, SW — each offset by `_ROBOT_CLEARANCE` (20 cm) from the obstacle cell edge
 - 4 side midpoints: N, S, E, W — each offset by `_ROBOT_CLEARANCE` from the obstacle cell edge
 
+Exact coordinates for obstacle at `(obs.x, obs.y)` with `c = _ROBOT_CLEARANCE`:
+```
+NE: (obs.x + CELL_CM + c,  obs.y + CELL_CM + c)
+NW: (obs.x - c,             obs.y + CELL_CM + c)
+SE: (obs.x + CELL_CM + c,  obs.y - c)
+SW: (obs.x - c,             obs.y - c)
+N:  (obs.x + CELL_CM/2,    obs.y + CELL_CM + c)
+S:  (obs.x + CELL_CM/2,    obs.y - c)
+E:  (obs.x + CELL_CM + c,  obs.y + CELL_CM/2)
+W:  (obs.x - c,             obs.y + CELL_CM/2)
+```
+
 For each candidate waypoint `w`:
 - Check `q1 → w` direct path is clear
 - Check `w → q2` direct path is clear
