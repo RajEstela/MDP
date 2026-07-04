@@ -2,9 +2,8 @@ import itertools
 import math
 import random as _random
 
-from simulator.config import APPROACH_CM, ARENA_CM, CELL_CM, FPS, GRID_SIZE, ROBOT_W_CM, START_THETA, START_X_CM, START_Y_CM, TURN_RADIUS_CM
-from simulator.dubins import dubins_lrl, dubins_lsl, dubins_lsr, dubins_rlr, dubins_rsl, dubins_rsr
-from simulator.types import Command, DubinsPath, Obstacle, RobotState
+from simulator.config import APPROACH_CM, ARENA_CM, CELL_CM, FPS, GRID_SIZE, START_THETA, START_X_CM, START_Y_CM
+from simulator.types import Command, Obstacle, RobotState
 
 OBSTACLES: list[Obstacle] = [
     Obstacle(x=50,  y=50,  face='N'),
@@ -19,7 +18,7 @@ def _valid_faces(col: int, row: int) -> list[str]:
     cx = col * CELL_CM + CELL_CM / 2
     cy = row * CELL_CM + CELL_CM / 2
     d = CELL_CM / 2 + APPROACH_CM   # 25 cm standoff from face centre
-    m = TURN_RADIUS_CM + 5           # 30 cm boundary margin
+    m = 30.0                          # 30 cm boundary margin
     faces: list[str] = []
     if m <= cx <= ARENA_CM - m and m <= cy + d <= ARENA_CM - m:
         faces.append('N')
@@ -68,17 +67,7 @@ def generate_random_obstacles(n: int = 5, seed: int | None = None) -> list[Obsta
     return obstacles
 
 
-_SEGMENT_KINDS: dict[str, tuple[str, str, str]] = {
-    'LSL': ('AL', 'FW', 'AL'),
-    'LSR': ('AL', 'FW', 'AR'),
-    'RSL': ('AR', 'FW', 'AL'),
-    'RSR': ('AR', 'FW', 'AR'),
-    'LRL': ('AL', 'AR', 'AL'),
-    'RLR': ('AR', 'AL', 'AR'),
-}
-
 _ROBOT_CLEARANCE = 20.0          # cm clearance from every obstacle cell edge
-_BACKUP_DISTANCES = (25, 40, 60, 80)  # cm to try reversing before forward Dubins
 
 
 def _angle_diff(from_deg: float, to_deg: float) -> float:
@@ -112,15 +101,17 @@ def _point_hits_obstacle(x: float, y: float, obstacles: list[Obstacle]) -> bool:
 def _path_in_bounds(
     q1: RobotState,
     cmds: list[Command],
-    r: float,
     obstacles: list[Obstacle] | None = None,
 ) -> bool:
-    """Sample at 2 cm intervals; return True iff every point is inside the arena and clear of obstacles.
-    Handles FW, BW, AL, AR commands."""
+    """Sample FW/BW at 2 cm intervals; RL/RR update heading only. True iff path stays in arena and clear of obstacles."""
     x, y, theta = q1.x, q1.y, q1.theta
     step = 2.0
     obs_list = obstacles or []
     for cmd in cmds:
+        if cmd.kind in ('RL', 'RR'):
+            sign = 1 if cmd.kind == 'RL' else -1
+            theta = (theta + sign * cmd.value) % 360
+            continue
         remaining = cmd.value
         while remaining > 0.001:
             advance = min(step, remaining)
@@ -132,13 +123,6 @@ def _path_in_bounds(
                 rad = math.radians(theta)
                 x -= advance * math.cos(rad)
                 y -= advance * math.sin(rad)
-            elif cmd.kind in ('AL', 'AR'):
-                sign = 1 if cmd.kind == 'AL' else -1
-                rad = math.radians(theta)
-                new_rad = rad + sign * advance / r
-                x += sign * r * (math.sin(new_rad) - math.sin(rad))
-                y -= sign * r * (math.cos(new_rad) - math.cos(rad))
-                theta = math.degrees(new_rad) % 360
             remaining -= advance
             if not (0 <= x <= ARENA_CM and 0 <= y <= ARENA_CM):
                 return False
@@ -147,102 +131,109 @@ def _path_in_bounds(
     return True
 
 
-def dubins_to_commands(path: DubinsPath) -> list[Command]:
-    k1, k2, k3 = _SEGMENT_KINDS[path.path_type]
-    cmds = []
-    for kind, seg in zip((k1, k2, k3), (path.seg1, path.seg2, path.seg3)):
-        if seg > 0.01:
-            cmds.append(Command(kind, seg))
-    return cmds
+def _direct_leg(q1: RobotState, q2: RobotState) -> tuple[list[Command], float]:
+    """Build rotate→FW→rotate commands from q1 to q2."""
+    dx = q2.x - q1.x
+    dy = q2.y - q1.y
+    dist = math.hypot(dx, dy)
+    cmds: list[Command] = []
+
+    if dist > 0.01:
+        travel = math.degrees(math.atan2(dy, dx)) % 360
+        r1 = _angle_diff(q1.theta, travel)
+        if abs(r1) > 0.01:
+            cmds.append(Command('RL' if r1 > 0 else 'RR', abs(r1)))
+        cmds.append(Command('FW', dist))
+        r2 = _angle_diff(travel, q2.theta)
+        if abs(r2) > 0.01:
+            cmds.append(Command('RL' if r2 > 0 else 'RR', abs(r2)))
+    else:
+        rot = _angle_diff(q1.theta, q2.theta)
+        if abs(rot) > 0.01:
+            cmds.append(Command('RL' if rot > 0 else 'RR', abs(rot)))
+
+    return cmds, dist
 
 
-def _all_dubins(q1: RobotState, q2: RobotState, r: float) -> list[DubinsPath]:
-    """Return all valid Dubins path types sorted shortest first."""
-    return sorted(
-        (c for c in [
-            dubins_lsl(q1, q2, r), dubins_rsr(q1, q2, r),
-            dubins_lsr(q1, q2, r), dubins_rsl(q1, q2, r),
-            dubins_rlr(q1, q2, r), dubins_lrl(q1, q2, r),
-        ] if c is not None),
-        key=lambda p: p.total,
-    )
+def _bypass_waypoints(obs: Obstacle) -> list[tuple[float, float]]:
+    """8 candidate bypass points around an obstacle (4 corners + 4 side midpoints)."""
+    c = _ROBOT_CLEARANCE
+    x, y, half = obs.x, obs.y, CELL_CM / 2
+    return [
+        (x + CELL_CM + c, y + CELL_CM + c),  # NE
+        (x - c,           y + CELL_CM + c),  # NW
+        (x + CELL_CM + c, y - c),             # SE
+        (x - c,           y - c),             # SW
+        (x + half,        y + CELL_CM + c),   # N
+        (x + half,        y - c),             # S
+        (x + CELL_CM + c, y + half),          # E
+        (x - c,           y + half),          # W
+    ]
+
 
 
 def _plan_leg(
     q1: RobotState,
     q2: RobotState,
-    r: float,
     obstacles: list[Obstacle] | None = None,
 ) -> tuple[list[Command], float]:
-    """Plan the best collision-free path from q1 to q2.
+    """Plan a collision-free straight-line path from q1 to q2.
 
-    Strategy:
-      1. Try all 6 forward Dubins types (shortest first).
-      2. If none clear, try reversing N cm then forward Dubins (for each backup distance).
-      3. Fall back to shortest forward Dubins if everything fails.
-
-    Returns (commands, total_distance_cm).
+    Pass 1: direct route (rotate → FW → rotate).
+    Pass 2: if blocked, try 8 bypass waypoints per obstacle.
+    Fallback: direct route even if it clips an obstacle.
     """
-    candidates = _all_dubins(q1, q2, r)
+    obs_list = obstacles or []
 
-    # ── Pass 1: forward-only Dubins ──────────────────────────────────────────
-    for path in candidates:
-        cmds = dubins_to_commands(path)
-        if _path_in_bounds(q1, cmds, r, obstacles):
-            return cmds, path.total
+    cmds, dist = _direct_leg(q1, q2)
+    if not obs_list or _path_in_bounds(q1, cmds, obs_list):
+        return cmds, dist
 
-    # ── Pass 2: reverse N cm then forward Dubins ─────────────────────────────
-    rad = math.radians(q1.theta)
-    for backup in _BACKUP_DISTANCES:
-        q_back = RobotState(
-            x=q1.x - backup * math.cos(rad),
-            y=q1.y - backup * math.sin(rad),
-            theta=q1.theta,
-        )
-        if not (0 <= q_back.x <= ARENA_CM and 0 <= q_back.y <= ARENA_CM):
-            continue
+    best_cmds: list[Command] | None = None
+    best_dist = float('inf')
 
-        bw_cmd = Command('BW', float(backup))
-        # Verify the backup leg itself is clear
-        if obstacles and not _path_in_bounds(q1, [bw_cmd], r, obstacles):
-            continue
+    for obs in obs_list:
+        for wx, wy in _bypass_waypoints(obs):
+            if not (0 <= wx <= ARENA_CM and 0 <= wy <= ARENA_CM):
+                continue
+            dx1, dy1 = wx - q1.x, wy - q1.y
+            dx2, dy2 = q2.x - wx, q2.y - wy
+            d1, d2 = math.hypot(dx1, dy1), math.hypot(dx2, dy2)
+            if d1 < 0.01 or d2 < 0.01:
+                continue
 
-        for path in _all_dubins(q_back, q2, r):
-            fwd_cmds = dubins_to_commands(path)
-            all_cmds = [bw_cmd] + fwd_cmds
-            if _path_in_bounds(q1, all_cmds, r, obstacles):
-                return all_cmds, backup + path.total
+            h1 = math.degrees(math.atan2(dy1, dx1)) % 360
+            h2 = math.degrees(math.atan2(dy2, dx2)) % 360
 
-    # ── Fallback: shortest forward path (may still clip an obstacle) ─────────
-    best = candidates[0]
-    return dubins_to_commands(best), best.total
+            seg: list[Command] = []
+            rot1 = _angle_diff(q1.theta, h1)
+            if abs(rot1) > 0.01:
+                seg.append(Command('RL' if rot1 > 0 else 'RR', abs(rot1)))
+            seg.append(Command('FW', d1))
+            rot2 = _angle_diff(h1, h2)
+            if abs(rot2) > 0.01:
+                seg.append(Command('RL' if rot2 > 0 else 'RR', abs(rot2)))
+            seg.append(Command('FW', d2))
+            rot3 = _angle_diff(h2, q2.theta)
+            if abs(rot3) > 0.01:
+                seg.append(Command('RL' if rot3 > 0 else 'RR', abs(rot3)))
 
+            total = d1 + d2
+            if total < best_dist and _path_in_bounds(q1, seg, obs_list):
+                best_dist = total
+                best_cmds = seg
 
-def _dubins_bounded(
-    q1: RobotState,
-    q2: RobotState,
-    r: float,
-    obstacles: list[Obstacle] | None = None,
-) -> DubinsPath:
-    """Forward-only bounded Dubins path used for Hamiltonian ordering cost.
-    Returns shortest valid path; falls back to shortest if none are clear."""
-    candidates = _all_dubins(q1, q2, r)
-    for path in candidates:
-        if _path_in_bounds(q1, dubins_to_commands(path), r, obstacles):
-            return path
-    return candidates[0]
+    if best_cmds is not None:
+        return best_cmds, best_dist
+
+    return _direct_leg(q1, q2)
 
 
-def _total_dubins_length(
-    start: RobotState,
-    poses: list[RobotState],
-    r: float,
-    obstacles: list[Obstacle] | None = None,
-) -> float:
+def _total_straight_length(start: RobotState, poses: list[RobotState]) -> float:
     total = 0.0
     current = start
     for pose in poses:
-        total += _dubins_bounded(current, pose, r, obstacles).total
+        total += math.hypot(pose.x - current.x, pose.y - current.y)
         current = pose
     return total
 
@@ -250,13 +241,11 @@ def _total_dubins_length(
 def _hamiltonian_optimal_order(
     start: RobotState,
     poses: list[RobotState],
-    r: float,
-    obstacles: list[Obstacle] | None = None,
 ) -> list[RobotState]:
     best: list[RobotState] = []
     best_len = float('inf')
     for perm in itertools.permutations(poses):
-        length = _total_dubins_length(start, list(perm), r, obstacles)
+        length = _total_straight_length(start, list(perm))
         if length < best_len:
             best_len = length
             best = list(perm)
@@ -267,33 +256,31 @@ def get_top_n_routes(
     obstacles: list[Obstacle],
     n: int = 5,
 ) -> list[tuple[list[Command], float]]:
-    """Return the N shortest routes as (commands, total_length_cm) pairs, best first."""
     start = RobotState(x=START_X_CM, y=START_Y_CM, theta=START_THETA)
     obs_poses = [(obs, obstacle_approach_pose(obs)) for obs in obstacles]
     poses = [p for _, p in obs_poses]
 
     ranked: list[tuple[float, list[RobotState]]] = []
     for perm in itertools.permutations(poses):
-        length = _total_dubins_length(start, list(perm), TURN_RADIUS_CM, obstacles)
+        length = _total_straight_length(start, list(perm))
         ranked.append((length, list(perm)))
     ranked.sort(key=lambda x: x[0])
 
     routes: list[tuple[list[Command], float]] = []
-    for total_len, ordered_poses in ranked[:n]:
+    for _, ordered_poses in ranked[:n]:
         cmds: list[Command] = []
         total_actual = 0.0
         current = start
         for pose in ordered_poses:
             target_obs = next(obs for obs, p in obs_poses if p.x == pose.x and p.y == pose.y)
             other_obstacles = [o for o in obstacles if o is not target_obs]
-            leg_cmds, leg_len = _plan_leg(current, pose, TURN_RADIUS_CM, other_obstacles)
+            leg_cmds, leg_len = _plan_leg(current, pose, other_obstacles)
             cmds += leg_cmds
             cmds.append(Command('WAIT', 5.0 * FPS))
             total_actual += leg_len
             current = pose
         routes.append((cmds, total_actual))
 
-    # Re-sort by actual planned length (may differ from heuristic ordering cost)
     routes.sort(key=lambda x: x[1])
     return routes
 
@@ -302,13 +289,13 @@ def get_commands(obstacles: list[Obstacle]) -> list[Command]:
     start = RobotState(x=START_X_CM, y=START_Y_CM, theta=START_THETA)
     obs_poses = [(obs, obstacle_approach_pose(obs)) for obs in obstacles]
     poses = [p for _, p in obs_poses]
-    ordered_poses = _hamiltonian_optimal_order(start, poses, TURN_RADIUS_CM, obstacles)
+    ordered_poses = _hamiltonian_optimal_order(start, poses)
     current = start
     cmds: list[Command] = []
     for pose in ordered_poses:
         target_obs = next(obs for obs, p in obs_poses if p.x == pose.x and p.y == pose.y)
         other_obstacles = [o for o in obstacles if o is not target_obs]
-        leg_cmds, _ = _plan_leg(current, pose, TURN_RADIUS_CM, other_obstacles)
+        leg_cmds, _ = _plan_leg(current, pose, other_obstacles)
         cmds += leg_cmds
         cmds.append(Command('WAIT', 5.0 * FPS))
         current = pose

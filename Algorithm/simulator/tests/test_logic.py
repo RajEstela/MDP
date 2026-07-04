@@ -3,7 +3,7 @@ import math
 from simulator.arena import cm_to_px
 from simulator.dubins import dubins_lrl, dubins_lsl, dubins_lsr, dubins_optimal, dubins_rlr, dubins_rsl, dubins_rsr
 from simulator.config import START_THETA, START_X_CM, START_Y_CM
-from simulator.planner import OBSTACLES, dubins_to_commands, get_commands, obstacle_approach_pose, _hamiltonian_optimal_order, _angle_diff
+from simulator.planner import OBSTACLES, get_commands, obstacle_approach_pose, _hamiltonian_optimal_order, _angle_diff, _plan_leg, _path_in_bounds
 from simulator.robot import arc_step, move_forward, rotate, step_command
 from simulator.types import Command, DubinsPath, Obstacle, RobotState
 
@@ -154,7 +154,7 @@ def test_get_commands_non_empty():
 
 def test_get_commands_all_valid_kinds():
     cmds = get_commands(OBSTACLES)
-    valid = {'FW', 'BW', 'TL', 'TR', 'AL', 'AR', 'WAIT'}
+    valid = {'FW', 'BW', 'RL', 'RR', 'WAIT'}
     assert all(c.kind in valid for c in cmds)
 
 
@@ -248,52 +248,11 @@ def test_dubins_segments_non_negative():
     assert path.seg3 >= 0
 
 
-# ── Task 3: planner Stage 2 ────────────────────────────────────────────────
-
-def test_dubins_to_commands_lsl():
-    path = DubinsPath(path_type='LSL', seg1=30.0, seg2=50.0, seg3=20.0, total=100.0)
-    cmds = dubins_to_commands(path)
-    assert len(cmds) == 3
-    assert cmds[0].kind == 'AL'
-    assert cmds[1].kind == 'FW'
-    assert cmds[2].kind == 'AL'
-    assert abs(cmds[0].value - 30.0) < 0.001
-    assert abs(cmds[1].value - 50.0) < 0.001
-    assert abs(cmds[2].value - 20.0) < 0.001
-
-
-def test_dubins_to_commands_rsr():
-    path = DubinsPath(path_type='RSR', seg1=10.0, seg2=40.0, seg3=10.0, total=60.0)
-    cmds = dubins_to_commands(path)
-    assert len(cmds) == 3
-    assert cmds[0].kind == 'AR'
-    assert cmds[1].kind == 'FW'
-    assert cmds[2].kind == 'AR'
-    assert abs(cmds[0].value - 10.0) < 0.001
-    assert abs(cmds[1].value - 40.0) < 0.001
-    assert abs(cmds[2].value - 10.0) < 0.001
-
-
-def test_dubins_to_commands_lrl():
-    path = DubinsPath(path_type='LRL', seg1=15.0, seg2=25.0, seg3=15.0, total=55.0)
-    cmds = dubins_to_commands(path)
-    assert cmds[0].kind == 'AL'
-    assert cmds[1].kind == 'AR'
-    assert cmds[2].kind == 'AL'
-
-
-def test_dubins_to_commands_skips_zero_segments():
-    path = DubinsPath(path_type='LSL', seg1=30.0, seg2=0.0, seg3=20.0, total=50.0)
-    cmds = dubins_to_commands(path)
-    assert len(cmds) == 2
-    assert all(c.kind == 'AL' for c in cmds)
-
-
 def test_get_commands_produces_arc_commands():
     cmds = get_commands(OBSTACLES)
     kinds = {c.kind for c in cmds}
-    assert kinds <= {'FW', 'BW', 'AL', 'AR', 'WAIT'}
-    assert 'AL' in kinds or 'AR' in kinds
+    assert kinds <= {'FW', 'BW', 'RL', 'RR', 'WAIT'}
+    assert 'RL' in kinds or 'RR' in kinds
 
 
 def test_get_commands_all_values_positive():
@@ -390,7 +349,7 @@ def test_approach_pose_robot_faces_obstacle():
 def test_hamiltonian_visits_all_poses():
     start = RobotState(0, 0, 90)
     poses = [RobotState(50, 0, 0), RobotState(100, 0, 0), RobotState(150, 0, 0)]
-    result = _hamiltonian_optimal_order(start, poses, r=25)
+    result = _hamiltonian_optimal_order(start, poses)
     assert len(result) == 3
     result_coords = {(p.x, p.y) for p in result}
     expected_coords = {(p.x, p.y) for p in poses}
@@ -399,7 +358,7 @@ def test_hamiltonian_visits_all_poses():
 def test_hamiltonian_single_pose():
     start = RobotState(0, 0, 90)
     poses = [RobotState(50, 50, 0)]
-    result = _hamiltonian_optimal_order(start, poses, r=25)
+    result = _hamiltonian_optimal_order(start, poses)
     assert len(result) == 1
     assert result[0].x == 50 and result[0].y == 50
 
@@ -410,13 +369,13 @@ def test_hamiltonian_selects_shorter_order():
     start = RobotState(0, 0, 0)
     a = RobotState(100, 0, 0)
     b = RobotState(10, 0, 0)
-    result = _hamiltonian_optimal_order(start, [a, b], r=25)
+    result = _hamiltonian_optimal_order(start, [a, b])
     assert result[0].x == b.x
 
 def test_hamiltonian_five_poses_returns_five():
     start = RobotState(0, 0, 90)
     poses = [obstacle_approach_pose(obs) for obs in OBSTACLES]
-    result = _hamiltonian_optimal_order(start, poses, r=25)
+    result = _hamiltonian_optimal_order(start, poses)
     assert len(result) == 5
 
 
@@ -424,11 +383,11 @@ def test_hamiltonian_five_poses_returns_five():
 
 def test_get_commands_arc_commands_present():
     cmds = get_commands(OBSTACLES)
-    assert any(c.kind in ('AL', 'AR') for c in cmds)
+    assert any(c.kind in ('RL', 'RR') for c in cmds)
 
 def test_get_commands_no_unknown_kinds():
     cmds = get_commands(OBSTACLES)
-    valid = {'FW', 'BW', 'AL', 'AR', 'WAIT'}
+    valid = {'FW', 'BW', 'RL', 'RR', 'WAIT'}
     assert all(c.kind in valid for c in cmds)
 
 def test_get_commands_reaches_final_approach_pose():
@@ -497,3 +456,28 @@ def test_angle_diff_shortest_left():
 def test_angle_diff_exactly_180():
     # Exactly 180° away returns +180 (left)
     assert abs(_angle_diff(0, 180) - 180) < 0.01
+
+
+# ── Stage 4: straight-line pathing ─────────────────────────────────────────
+
+def test_get_commands_uses_rl_rr_not_arcs():
+    cmds = get_commands(OBSTACLES)
+    assert not any(c.kind in ('AL', 'AR') for c in cmds)
+    assert any(c.kind in ('RL', 'RR') for c in cmds)
+
+def test_plan_leg_direct_no_arcs():
+    q1 = RobotState(x=20, y=35, theta=90)
+    q2 = RobotState(x=55, y=80, theta=270)
+    cmds, dist = _plan_leg(q1, q2, obstacles=[])
+    assert all(c.kind in ('FW', 'BW', 'RL', 'RR', 'WAIT') for c in cmds)
+    assert any(c.kind == 'FW' for c in cmds)
+    assert dist > 0
+
+def test_path_in_bounds_handles_rl_rr():
+    state = RobotState(x=100, y=100, theta=0)
+    cmds = [
+        Command(kind='RL', value=90),
+        Command(kind='FW', value=20),
+        Command(kind='RR', value=45),
+    ]
+    assert _path_in_bounds(state, cmds) is True
