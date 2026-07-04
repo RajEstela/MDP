@@ -9,7 +9,7 @@
 
 
 
-===========================
+==============================
 How the Team "Fetches" Your DataFor your Week 3 checklist, just having the text print to the console is enough to
 prove to the supervisor that your camera works. But for Week 5, your Pi needs to act as the central brain,
 talking to the STM via serial and the Android tablet via Bluetooth.  Since print() doesn't send data to other
@@ -25,4 +25,4 @@ Option B: The "Socket Network" Approach (Localhost)You keep your detect_live.py 
 communication script.How it works: You set up a local Python network connection (called Sockets) inside the
 Raspberry Pi. When your AI sees the Bullseye, your script sends the string "100" over an invisible local port.
 Their script constantly listens on that port, hears "100", and fires off the command to the STM board.
-===========================
+==============================
