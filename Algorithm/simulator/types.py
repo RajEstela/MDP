@@ -17,8 +17,8 @@ class Obstacle:
 
 @dataclass
 class Command:
-    kind: str    # 'FW' | 'BW' | 'TL' | 'TR' | 'AL' | 'AR'
-    value: float # cm for FW/BW/AL/AR; degrees for TL/TR
+    kind: str    # 'FW' | 'BW' | 'RL' | 'RR' | 'WAIT'
+    value: float # cm for FW/BW; degrees for RL/RR; frames for WAIT
 
 
 @dataclass

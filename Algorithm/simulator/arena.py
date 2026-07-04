@@ -85,13 +85,10 @@ def trace_path_points(
                 rad = math.radians(theta)
                 x -= advance * math.cos(rad)
                 y -= advance * math.sin(rad)
-            elif cmd.kind in ('AL', 'AR'):
-                sign = 1 if cmd.kind == 'AL' else -1
-                rad = math.radians(theta)
-                new_rad = rad + sign * advance / r
-                x += sign * r * (math.sin(new_rad) - math.sin(rad))
-                y -= sign * r * (math.cos(new_rad) - math.cos(rad))
-                theta = math.degrees(new_rad) % 360
+            elif cmd.kind in ('RL', 'RR'):
+                sign = 1 if cmd.kind == 'RL' else -1
+                theta = (theta + sign * cmd.value) % 360
+                remaining = 0
             remaining -= advance
             points.append((x, y))
     return points
