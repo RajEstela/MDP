@@ -36,8 +36,10 @@ def generate_random_obstacles(n: int = 5, seed: int | None = None) -> list[Obsta
     Guarantees:
     - No obstacle in the 40×40 cm start zone (bottom-left 4×4 cells).
     - Every approach pose fits in the arena with ≥30 cm boundary clearance.
-    - Obstacles are at least 2 cells apart (Chebyshev distance ≥ 2) so their
-      clearance zones don't fully overlap.
+    - Obstacles are at least 6 cells apart (Chebyshev distance ≥ 6): each
+      obstacle's 50 cm clearance zone (20 cm each side + 10 cm cell) is then
+      separated by ≥10 cm from every neighbour's zone, ensuring the car can
+      always navigate between any pair of obstacles.
     """
     rng = _random.Random(seed)
 
@@ -57,7 +59,7 @@ def generate_random_obstacles(n: int = 5, seed: int | None = None) -> list[Obsta
     for col, row, faces in pool:
         if len(obstacles) == n:
             break
-        if any(max(abs(col - c), abs(row - r)) < 2 for c, r in used):
+        if any(max(abs(col - c), abs(row - r)) < 6 for c, r in used):
             continue
         face = rng.choice(faces)
         used.add((col, row))
