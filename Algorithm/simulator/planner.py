@@ -6,11 +6,11 @@ from simulator.config import APPROACH_CM, ARENA_CM, CELL_CM, FPS, GRID_SIZE, STA
 from simulator.types import Command, Obstacle, RobotState
 
 OBSTACLES: list[Obstacle] = [
-    Obstacle(x=50,  y=50,  face='N'),
-    Obstacle(x=100, y=60,  face='E'),
-    Obstacle(x=150, y=80,  face='S'),
-    Obstacle(x=80,  y=130, face='W'),
-    Obstacle(x=130, y=130, face='N'),
+    Obstacle(x=50,  y=100, face='N'),
+    Obstacle(x=110, y=100, face='E'),
+    Obstacle(x=50,  y=160, face='S'),
+    Obstacle(x=110, y=160, face='W'),
+    Obstacle(x=170, y=60,  face='N'),
 ]
 
 def _valid_faces(col: int, row: int) -> list[str]:
@@ -46,7 +46,7 @@ def generate_random_obstacles(n: int = 5, seed: int | None = None) -> list[Obsta
     pool: list[tuple[int, int, list[str]]] = []
     for col in range(GRID_SIZE):
         for row in range(GRID_SIZE):
-            if col < 4 and row < 4:        # exclude start zone
+            if col < 4 and row < 5:        # exclude start zone + one row clearance buffer
                 continue
             faces = _valid_faces(col, row)
             if faces:
@@ -184,8 +184,8 @@ def _plan_leg(
 ) -> tuple[list[Command], float]:
     """Plan a grid-aligned L-path from q1 to q2.
 
-    Tries horizontal-first then vertical-first; falls back to horizontal-first
-    if both clip an obstacle.
+    Tries H-first, then V-first, then a two-segment detour via a grid
+    intersection chosen to route around blocking obstacles.
     """
     obs_list = obstacles or []
 
@@ -197,7 +197,45 @@ def _plan_leg(
     if _path_in_bounds(q1, cmds_v, obs_list):
         return cmds_v, dist
 
-    return cmds_h, dist
+    # Both simple L-paths blocked — search for a two-leg detour via an
+    # intermediate grid-line intersection that bypasses blocking obstacles.
+    # Candidate x/y values: endpoints plus grid lines just outside each
+    # obstacle's clearance zone (the zone ends strictly at obs.x±20/+30).
+    candidate_xs: set[float] = {q1.x, q2.x}
+    candidate_ys: set[float] = {q1.y, q2.y}
+    for obs in obs_list:
+        for cx in (obs.x - 2 * CELL_CM, obs.x + 3 * CELL_CM):
+            if 0.0 <= cx <= ARENA_CM:
+                candidate_xs.add(cx)
+        for cy in (obs.y - 2 * CELL_CM, obs.y + 3 * CELL_CM):
+            if 0.0 <= cy <= ARENA_CM:
+                candidate_ys.add(cy)
+
+    best_cmds: list[Command] = cmds_h  # last-resort fallback
+    best_dist = float('inf')
+
+    for wx in sorted(candidate_xs):
+        for wy in sorted(candidate_ys):
+            if abs(wx - q1.x) < 0.01 and abs(wy - q1.y) < 0.01:
+                continue
+            if abs(wx - q2.x) < 0.01 and abs(wy - q2.y) < 0.01:
+                continue
+            for wtheta in (0.0, 90.0, 180.0, 270.0):
+                w = RobotState(x=wx, y=wy, theta=wtheta)
+                for h1 in (True, False):
+                    cmds1, d1 = _grid_leg(q1, w, horizontal_first=h1)
+                    if not _path_in_bounds(q1, cmds1, obs_list):
+                        continue
+                    for h2 in (True, False):
+                        cmds2, d2 = _grid_leg(w, q2, horizontal_first=h2)
+                        if not _path_in_bounds(w, cmds2, obs_list):
+                            continue
+                        total = d1 + d2
+                        if total < best_dist:
+                            best_dist = total
+                            best_cmds = cmds1 + cmds2
+
+    return best_cmds, (best_dist if best_dist < float('inf') else dist)
 
 
 def _total_manhattan_length(start: RobotState, poses: list[RobotState]) -> float:
@@ -243,9 +281,7 @@ def get_top_n_routes(
         total_actual = 0.0
         current = start
         for pose in ordered_poses:
-            target_obs = next(obs for obs, p in obs_poses if p.x == pose.x and p.y == pose.y)
-            other_obstacles = [o for o in obstacles if o is not target_obs]
-            leg_cmds, leg_len = _plan_leg(current, pose, other_obstacles)
+            leg_cmds, leg_len = _plan_leg(current, pose, obstacles)
             cmds += leg_cmds
             cmds.append(Command('WAIT', 5.0 * FPS))
             total_actual += leg_len
@@ -264,9 +300,7 @@ def get_commands(obstacles: list[Obstacle]) -> list[Command]:
     current = start
     cmds: list[Command] = []
     for pose in ordered_poses:
-        target_obs = next(obs for obs, p in obs_poses if p.x == pose.x and p.y == pose.y)
-        other_obstacles = [o for o in obstacles if o is not target_obs]
-        leg_cmds, _ = _plan_leg(current, pose, other_obstacles)
+        leg_cmds, _ = _plan_leg(current, pose, obstacles)
         cmds += leg_cmds
         cmds.append(Command('WAIT', 5.0 * FPS))
         current = pose

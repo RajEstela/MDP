@@ -3,7 +3,7 @@ import math
 from simulator.arena import cm_to_px
 from simulator.dubins import dubins_lrl, dubins_lsl, dubins_lsr, dubins_optimal, dubins_rlr, dubins_rsl, dubins_rsr
 from simulator.config import START_THETA, START_X_CM, START_Y_CM
-from simulator.planner import OBSTACLES, get_commands, obstacle_approach_pose, _hamiltonian_optimal_order, _angle_diff, _plan_leg, _path_in_bounds
+from simulator.planner import OBSTACLES, get_commands, generate_random_obstacles, obstacle_approach_pose, _hamiltonian_optimal_order, _angle_diff, _plan_leg, _path_in_bounds
 from simulator.robot import arc_step, move_forward, rotate, step_command
 from simulator.types import Command, DubinsPath, Obstacle, RobotState
 
@@ -495,3 +495,22 @@ def test_path_in_bounds_handles_rl_rr():
         Command(kind='RR', value=45),
     ]
     assert _path_in_bounds(state, cmds) is True
+
+
+def test_no_collision_random_arenas():
+    """50 random arenas: every planned leg must clear ALL obstacles (including target)."""
+    from simulator.config import START_X_CM, START_Y_CM, START_THETA
+    for seed in range(50):
+        obstacles = generate_random_obstacles(5, seed=seed)
+        start = RobotState(x=START_X_CM, y=START_Y_CM, theta=START_THETA)
+        obs_poses = [(obs, obstacle_approach_pose(obs)) for obs in obstacles]
+        poses = [p for _, p in obs_poses]
+        ordered = _hamiltonian_optimal_order(start, poses)
+        current = start
+        for pose in ordered:
+            leg_cmds, _ = _plan_leg(current, pose, obstacles)
+            assert _path_in_bounds(current, leg_cmds, obstacles), (
+                f"Collision detected: seed={seed}, "
+                f"from=({current.x},{current.y}) to=({pose.x},{pose.y})"
+            )
+            current = pose
