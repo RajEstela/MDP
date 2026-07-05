@@ -11,5 +11,5 @@ DEG_PER_FRAME = 3.0
 APPROACH_CM = 20   # robot standoff from obstacle face surface, in cm
 ARENA_CM = GRID_SIZE * CELL_CM  # 200 — full arena side length in cm
 START_X_CM = 20.0   # robot start x — center of 40x40 start zone
-START_Y_CM = 35.0   # robot apex start y — body (30 cm) spans y=5..35 inside start zone
+START_Y_CM = 30.0   # robot apex start y — body (30 cm) spans y=0..30 inside start zone, apex on grid line
 START_THETA = 90.0  # facing North at start

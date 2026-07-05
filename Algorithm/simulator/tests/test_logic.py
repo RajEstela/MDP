@@ -304,32 +304,32 @@ def test_dubins_lrl_endpoint():
 def test_approach_pose_north():
     obs = Obstacle(x=50, y=50, face='N')
     pose = obstacle_approach_pose(obs)
-    assert abs(pose.x - 55) < 0.01
-    assert abs(pose.y - 80) < 0.01
+    assert abs(pose.x - 50) < 0.01   # grid-aligned: obs.x (left edge)
+    assert abs(pose.y - 80) < 0.01   # obs.y + CELL_CM + APPROACH_CM = 50+10+20
     assert abs(pose.theta - 270) < 0.01
 
 
 def test_approach_pose_south():
     obs = Obstacle(x=50, y=50, face='S')
     pose = obstacle_approach_pose(obs)
-    assert abs(pose.x - 55) < 0.01
-    assert abs(pose.y - 30) < 0.01
+    assert abs(pose.x - 50) < 0.01   # grid-aligned: obs.x
+    assert abs(pose.y - 30) < 0.01   # obs.y - APPROACH_CM = 50-20
     assert abs(pose.theta - 90) < 0.01
 
 
 def test_approach_pose_east():
     obs = Obstacle(x=50, y=50, face='E')
     pose = obstacle_approach_pose(obs)
-    assert abs(pose.x - 80) < 0.01
-    assert abs(pose.y - 55) < 0.01
+    assert abs(pose.x - 80) < 0.01   # obs.x + CELL_CM + APPROACH_CM = 50+10+20
+    assert abs(pose.y - 50) < 0.01   # grid-aligned: obs.y (bottom edge)
     assert abs(pose.theta - 180) < 0.01
 
 
 def test_approach_pose_west():
     obs = Obstacle(x=50, y=50, face='W')
     pose = obstacle_approach_pose(obs)
-    assert abs(pose.x - 30) < 0.01
-    assert abs(pose.y - 55) < 0.01
+    assert abs(pose.x - 30) < 0.01   # obs.x - APPROACH_CM = 50-20
+    assert abs(pose.y - 50) < 0.01   # grid-aligned: obs.y
     assert abs(pose.theta - 0) < 0.01
 
 
@@ -466,12 +466,26 @@ def test_get_commands_uses_rl_rr_not_arcs():
     assert any(c.kind in ('RL', 'RR') for c in cmds)
 
 def test_plan_leg_direct_no_arcs():
-    q1 = RobotState(x=20, y=35, theta=90)
-    q2 = RobotState(x=55, y=80, theta=270)
+    q1 = RobotState(x=20, y=30, theta=90)   # grid-aligned start
+    q2 = RobotState(x=50, y=80, theta=270)  # grid-aligned end
     cmds, dist = _plan_leg(q1, q2, obstacles=[])
     assert all(c.kind in ('FW', 'BW', 'RL', 'RR', 'WAIT') for c in cmds)
     assert any(c.kind == 'FW' for c in cmds)
     assert dist > 0
+
+
+def test_plan_leg_grid_aligned():
+    q1 = RobotState(x=20, y=30, theta=90)   # facing North
+    q2 = RobotState(x=50, y=80, theta=270)  # facing South
+    cmds, dist = _plan_leg(q1, q2, obstacles=[])
+    # Manhattan distance = |50-20| + |80-30| = 30 + 50 = 80
+    assert abs(dist - 80) < 0.01
+    # Two FW segments: 30 cm horizontal + 50 cm vertical
+    fw_cmds = [c for c in cmds if c.kind == 'FW']
+    assert len(fw_cmds) == 2
+    fw_values = sorted(c.value for c in fw_cmds)
+    assert abs(fw_values[0] - 30) < 0.01
+    assert abs(fw_values[1] - 50) < 0.01
 
 def test_path_in_bounds_handles_rl_rr():
     state = RobotState(x=100, y=100, theta=0)

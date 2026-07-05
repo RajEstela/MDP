@@ -14,25 +14,24 @@ OBSTACLES: list[Obstacle] = [
 ]
 
 def _valid_faces(col: int, row: int) -> list[str]:
-    """Return face directions whose approach pose fits inside the arena with ≥30 cm boundary margin."""
-    cx = col * CELL_CM + CELL_CM / 2
-    cy = row * CELL_CM + CELL_CM / 2
-    d = CELL_CM / 2 + APPROACH_CM   # 25 cm standoff from face centre
-    m = 30.0                          # 30 cm boundary margin
+    """Return face directions whose grid-aligned approach pose fits inside the arena with ≥30 cm boundary margin."""
+    ox = col * CELL_CM
+    oy = row * CELL_CM
+    m = 30.0
     faces: list[str] = []
-    if m <= cx <= ARENA_CM - m and m <= cy + d <= ARENA_CM - m:
+    if m <= ox <= ARENA_CM - m and m <= oy + CELL_CM + APPROACH_CM <= ARENA_CM - m:
         faces.append('N')
-    if m <= cx <= ARENA_CM - m and m <= cy - d <= ARENA_CM - m:
+    if m <= ox <= ARENA_CM - m and m <= oy - APPROACH_CM <= ARENA_CM - m:
         faces.append('S')
-    if m <= cx + d <= ARENA_CM - m and m <= cy <= ARENA_CM - m:
+    if m <= ox + CELL_CM + APPROACH_CM <= ARENA_CM - m and m <= oy <= ARENA_CM - m:
         faces.append('E')
-    if m <= cx - d <= ARENA_CM - m and m <= cy <= ARENA_CM - m:
+    if m <= ox - APPROACH_CM <= ARENA_CM - m and m <= oy <= ARENA_CM - m:
         faces.append('W')
     return faces
 
 
 def generate_random_obstacles(n: int = 5, seed: int | None = None) -> list[Obstacle]:
-    """Generate n random obstacles with valid approach poses.
+    """Generate n random obstacles with valid grid-aligned approach poses.
 
     Guarantees:
     - No obstacle in the 40×40 cm start zone (bottom-left 4×4 cells).
@@ -77,17 +76,15 @@ def _angle_diff(from_deg: float, to_deg: float) -> float:
 
 
 def obstacle_approach_pose(obs: Obstacle) -> RobotState:
-    cx = obs.x + CELL_CM / 2
-    cy = obs.y + CELL_CM / 2
-    d = CELL_CM / 2 + APPROACH_CM
+    """Grid-aligned approach pose: apex on a grid-line intersection in front of the obstacle face."""
     if obs.face == 'N':
-        return RobotState(x=cx, y=cy + d, theta=270)
+        return RobotState(x=obs.x, y=obs.y + CELL_CM + APPROACH_CM, theta=270)
     if obs.face == 'S':
-        return RobotState(x=cx, y=cy - d, theta=90)
+        return RobotState(x=obs.x, y=obs.y - APPROACH_CM, theta=90)
     if obs.face == 'E':
-        return RobotState(x=cx + d, y=cy, theta=180)
+        return RobotState(x=obs.x + CELL_CM + APPROACH_CM, y=obs.y, theta=180)
     # face == 'W'
-    return RobotState(x=cx - d, y=cy, theta=0)
+    return RobotState(x=obs.x - APPROACH_CM, y=obs.y, theta=0)
 
 
 def _point_hits_obstacle(x: float, y: float, obstacles: list[Obstacle]) -> bool:
@@ -131,45 +128,51 @@ def _path_in_bounds(
     return True
 
 
-def _direct_leg(q1: RobotState, q2: RobotState) -> tuple[list[Command], float]:
-    """Build rotate→FW→rotate commands from q1 to q2."""
+def _grid_leg(q1: RobotState, q2: RobotState, horizontal_first: bool = True) -> tuple[list[Command], float]:
+    """Grid-aligned L-path: one horizontal segment then one vertical (or reversed).
+
+    Rotates to a cardinal direction (0/90/180/270) before each FW segment.
+    Returns (commands, manhattan_distance).
+    """
     dx = q2.x - q1.x
     dy = q2.y - q1.y
-    dist = math.hypot(dx, dy)
     cmds: list[Command] = []
+    dist = abs(dx) + abs(dy)
 
-    if dist > 0.01:
-        travel = math.degrees(math.atan2(dy, dx)) % 360
-        r1 = _angle_diff(q1.theta, travel)
-        if abs(r1) > 0.01:
-            cmds.append(Command('RL' if r1 > 0 else 'RR', abs(r1)))
-        cmds.append(Command('FW', dist))
-        r2 = _angle_diff(travel, q2.theta)
-        if abs(r2) > 0.01:
-            cmds.append(Command('RL' if r2 > 0 else 'RR', abs(r2)))
-    else:
+    if abs(dx) < 0.01 and abs(dy) < 0.01:
         rot = _angle_diff(q1.theta, q2.theta)
         if abs(rot) > 0.01:
             cmds.append(Command('RL' if rot > 0 else 'RR', abs(rot)))
+        return cmds, 0.0
+
+    h_heading = 0.0 if dx > 0 else 180.0   # East / West
+    v_heading = 90.0 if dy > 0 else 270.0  # North / South
+
+    segs: list[tuple[float, float]] = []
+    if horizontal_first:
+        if abs(dx) > 0.01:
+            segs.append((h_heading, abs(dx)))
+        if abs(dy) > 0.01:
+            segs.append((v_heading, abs(dy)))
+    else:
+        if abs(dy) > 0.01:
+            segs.append((v_heading, abs(dy)))
+        if abs(dx) > 0.01:
+            segs.append((h_heading, abs(dx)))
+
+    current_theta = q1.theta
+    for heading, length in segs:
+        rot = _angle_diff(current_theta, heading)
+        if abs(rot) > 0.01:
+            cmds.append(Command('RL' if rot > 0 else 'RR', abs(rot)))
+        cmds.append(Command('FW', length))
+        current_theta = heading
+
+    rot = _angle_diff(current_theta, q2.theta)
+    if abs(rot) > 0.01:
+        cmds.append(Command('RL' if rot > 0 else 'RR', abs(rot)))
 
     return cmds, dist
-
-
-def _bypass_waypoints(obs: Obstacle) -> list[tuple[float, float]]:
-    """8 candidate bypass points around an obstacle (4 corners + 4 side midpoints)."""
-    c = _ROBOT_CLEARANCE
-    x, y, half = obs.x, obs.y, CELL_CM / 2
-    return [
-        (x + CELL_CM + c, y + CELL_CM + c),  # NE
-        (x - c,           y + CELL_CM + c),  # NW
-        (x + CELL_CM + c, y - c),             # SE
-        (x - c,           y - c),             # SW
-        (x + half,        y + CELL_CM + c),   # N
-        (x + half,        y - c),             # S
-        (x + CELL_CM + c, y + half),          # E
-        (x - c,           y + half),          # W
-    ]
-
 
 
 def _plan_leg(
@@ -177,63 +180,29 @@ def _plan_leg(
     q2: RobotState,
     obstacles: list[Obstacle] | None = None,
 ) -> tuple[list[Command], float]:
-    """Plan a collision-free straight-line path from q1 to q2.
+    """Plan a grid-aligned L-path from q1 to q2.
 
-    Pass 1: direct route (rotate → FW → rotate).
-    Pass 2: if blocked, try 8 bypass waypoints per obstacle.
-    Fallback: direct route even if it clips an obstacle.
+    Tries horizontal-first then vertical-first; falls back to horizontal-first
+    if both clip an obstacle.
     """
     obs_list = obstacles or []
 
-    cmds, dist = _direct_leg(q1, q2)
-    if not obs_list or _path_in_bounds(q1, cmds, obs_list):
-        return cmds, dist
+    cmds_h, dist = _grid_leg(q1, q2, horizontal_first=True)
+    if not obs_list or _path_in_bounds(q1, cmds_h, obs_list):
+        return cmds_h, dist
 
-    best_cmds: list[Command] | None = None
-    best_dist = float('inf')
+    cmds_v, _ = _grid_leg(q1, q2, horizontal_first=False)
+    if _path_in_bounds(q1, cmds_v, obs_list):
+        return cmds_v, dist
 
-    for obs in obs_list:
-        for wx, wy in _bypass_waypoints(obs):
-            if not (0 <= wx <= ARENA_CM and 0 <= wy <= ARENA_CM):
-                continue
-            dx1, dy1 = wx - q1.x, wy - q1.y
-            dx2, dy2 = q2.x - wx, q2.y - wy
-            d1, d2 = math.hypot(dx1, dy1), math.hypot(dx2, dy2)
-            if d1 < 0.01 or d2 < 0.01:
-                continue
-
-            h1 = math.degrees(math.atan2(dy1, dx1)) % 360
-            h2 = math.degrees(math.atan2(dy2, dx2)) % 360
-
-            seg: list[Command] = []
-            rot1 = _angle_diff(q1.theta, h1)
-            if abs(rot1) > 0.01:
-                seg.append(Command('RL' if rot1 > 0 else 'RR', abs(rot1)))
-            seg.append(Command('FW', d1))
-            rot2 = _angle_diff(h1, h2)
-            if abs(rot2) > 0.01:
-                seg.append(Command('RL' if rot2 > 0 else 'RR', abs(rot2)))
-            seg.append(Command('FW', d2))
-            rot3 = _angle_diff(h2, q2.theta)
-            if abs(rot3) > 0.01:
-                seg.append(Command('RL' if rot3 > 0 else 'RR', abs(rot3)))
-
-            total = d1 + d2
-            if total < best_dist and _path_in_bounds(q1, seg, obs_list):
-                best_dist = total
-                best_cmds = seg
-
-    if best_cmds is not None:
-        return best_cmds, best_dist
-
-    return _direct_leg(q1, q2)
+    return cmds_h, dist
 
 
-def _total_straight_length(start: RobotState, poses: list[RobotState]) -> float:
+def _total_manhattan_length(start: RobotState, poses: list[RobotState]) -> float:
     total = 0.0
     current = start
     for pose in poses:
-        total += math.hypot(pose.x - current.x, pose.y - current.y)
+        total += abs(pose.x - current.x) + abs(pose.y - current.y)
         current = pose
     return total
 
@@ -245,7 +214,7 @@ def _hamiltonian_optimal_order(
     best: list[RobotState] = []
     best_len = float('inf')
     for perm in itertools.permutations(poses):
-        length = _total_straight_length(start, list(perm))
+        length = _total_manhattan_length(start, list(perm))
         if length < best_len:
             best_len = length
             best = list(perm)
@@ -262,7 +231,7 @@ def get_top_n_routes(
 
     ranked: list[tuple[float, list[RobotState]]] = []
     for perm in itertools.permutations(poses):
-        length = _total_straight_length(start, list(perm))
+        length = _total_manhattan_length(start, list(perm))
         ranked.append((length, list(perm)))
     ranked.sort(key=lambda x: x[0])
 
