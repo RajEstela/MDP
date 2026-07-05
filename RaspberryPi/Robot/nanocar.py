@@ -1,0 +1,240 @@
+import serial
+import struct
+import time
+import threading
+
+SERIAL_PORT = "/dev/ttyS0"
+BAUD_RATE = 115200
+
+HEADER = 0x5A
+PACKET_LEN = 0x0C
+ID = 0x01
+FUNCTION = 0x01
+RESERVE = 0x00
+CRC_IGNORE = 0xFF
+
+DRIVE_SPEED = 1000
+ROTATION_SPEED = 100
+FULL_LOCK = 1000
+CM_PER_SECOND = 102.0
+LEFT_STEP_DURATION = 0.455
+RIGHT_STEP_DURATION = 0.475
+DEGREES_PER_STEP = 15.0
+SEND_INTERVAL = 0.01
+
+DURATION_OFFSET_BASE = 0.12
+FORWARD_OFFSET_ANGLE = 190
+BACKWARD_OFFSET_ANGLE = -220
+
+
+def build_packet(x_speed, z_angle):
+    x_speed = max(-1000, min(1000, x_speed))
+    z_angle = max(-1000, min(1000, z_angle))
+    x_b = struct.pack(">h", x_speed)
+    y_b = struct.pack(">h", 0)
+    z_b = struct.pack(">h", z_angle)
+    return bytes([HEADER, PACKET_LEN, ID, FUNCTION]) + x_b + y_b + z_b + bytes([RESERVE, CRC_IGNORE])
+
+
+class NanoCarLink:
+    def __init__(self, port=SERIAL_PORT, baud=BAUD_RATE):
+        self.port = port
+        self.baud = baud
+        self.ser = None
+        self.current_x = 0
+        self.current_z = 0
+        self.running = False
+        self._thread = None
+        self._lock = threading.Lock()
+
+    def connect(self):
+        print("[CONNECT] Opening serial port " + self.port + " at " + str(self.baud) + " baud...")
+        self.ser = serial.Serial(self.port, self.baud, timeout=1)
+        time.sleep(0.5)
+        print("[CONNECT] Serial port opened successfully")
+
+    def disconnect(self):
+        if self.ser:
+            print("[DISCONNECT] Stopping heartbeat and sending stop...")
+            self.stop_heartbeat()
+            self._send_now(0, 0)
+            time.sleep(0.1)
+            self.ser.close()
+            print("[DISCONNECT] Serial port closed")
+
+    def _send_now(self, x_speed, z_angle):
+        packet = build_packet(x_speed, z_angle)
+        self.ser.write(packet)
+
+    def start_heartbeat(self):
+        self.running = True
+        def heartbeat():
+            while self.running:
+                with self._lock:
+                    x = self.current_x
+                    z = self.current_z
+                self._send_now(x, z)
+                time.sleep(SEND_INTERVAL)
+        self._thread = threading.Thread(target=heartbeat, daemon=True)
+        self._thread.start()
+        print("[HEARTBEAT] Started - sending packets every " + str(SEND_INTERVAL) + "s")
+
+    def stop_heartbeat(self):
+        self.running = False
+        if self._thread:
+            self._thread.join(timeout=1)
+        print("[HEARTBEAT] Stopped")
+
+    def _set_command(self, x_speed, z_angle):
+        with self._lock:
+            self.current_x = x_speed
+            self.current_z = z_angle
+
+    def drive(self, x_speed, z_angle, duration):
+        print("[DRIVE] x=" + str(x_speed) + " z=" + str(z_angle) + " for " + str(round(duration, 3)) + "s")
+        self._set_command(x_speed, z_angle)
+        time.sleep(duration)
+        print("[DRIVE] Done")
+
+    def stop(self, hold=0.3):
+        print("[STOP] Holding stop for " + str(hold) + "s")
+        self._set_command(0, 0)
+        time.sleep(hold)
+        print("[STOP] Done")
+
+    def establish_connection(self, attempts=10, interval=0.3):
+        print("[CONN] Sending " + str(attempts) + " zero packets to establish connection...")
+        for i in range(attempts):
+            self._send_now(0, 0)
+            print("[CONN] Packet " + str(i+1) + "/" + str(attempts) + " sent")
+            time.sleep(interval)
+        print("[CONN] Done. Watch for buzzer beep + fast green LED on robot.")
+        print("[CONN] Starting heartbeat to keep connection alive...")
+        self.start_heartbeat()
+        print("[CONN] Ready.")
+
+        
+    def move_forward(self, cm):
+        segment = 30.0  # drive in 30cm chunks
+        full = int(cm / segment)
+        remainder = cm % segment
+        for i in range(full):
+            self.drive(DRIVE_SPEED, FORWARD_OFFSET_ANGLE, segment / CM_PER_SECOND)
+            self.stop(0.1)
+        if remainder > 0:
+            offset = 0
+            if cm <= segment:
+                offset = DURATION_OFFSET_BASE
+            duration = remainder / CM_PER_SECOND + offset
+            self.drive(DRIVE_SPEED, FORWARD_OFFSET_ANGLE, duration)
+        self.stop()
+
+    def move_backward(self, cm):
+        segment = 30.0  # drive in 30cm chunks
+        full = int(cm / segment)
+        remainder = cm % segment
+        for i in range(full):
+            self.drive(-DRIVE_SPEED, BACKWARD_OFFSET_ANGLE, segment / CM_PER_SECOND)
+            self.stop(0.1)
+        if remainder > 0:
+            offset = 0
+            if remainder >= 10 and cm <= segment:
+                offset = DURATION_OFFSET_BASE
+            duration = remainder / CM_PER_SECOND + offset
+            self.drive(-DRIVE_SPEED, BACKWARD_OFFSET_ANGLE, duration)
+        self.stop()
+            
+    def rotate_left(self, degrees):
+        steps_needed = degrees / DEGREES_PER_STEP
+        full_steps = int(steps_needed)
+        remainder = steps_needed - full_steps
+        print("[ROT_L] " + str(degrees) + " deg | steps=" + str(full_steps) + " remainder=" + str(round(remainder,3)))
+        for i in range(full_steps):
+            print("[ROT_L] Step " + str(i+1) + "/" + str(full_steps))
+            self.drive(ROTATION_SPEED, FULL_LOCK, LEFT_STEP_DURATION)
+            self.drive(-ROTATION_SPEED, FULL_LOCK, LEFT_STEP_DURATION)
+            self.stop(0.1)
+            
+        if remainder > 0.02:
+            partial = LEFT_STEP_DURATION * remainder
+            print("[ROT_L] Partial step: " + str(round(partial,3)) + "s")
+            self.drive(ROTATION_SPEED, FULL_LOCK, partial)
+            self.drive(-ROTATION_SPEED, FULL_LOCK, partial)
+        self.stop()
+        print("[ROT_L] Complete")
+        
+    def rotate_right(self, degrees):
+        steps_needed = degrees / DEGREES_PER_STEP
+        full_steps = int(steps_needed)
+        remainder = steps_needed - full_steps
+        print("[ROT_R] " + str(degrees) + " deg | steps=" + str(full_steps) + " remainder=" + str(round(remainder,3)))
+        for i in range(full_steps):
+            print("[ROT_R] Step " + str(i+1) + "/" + str(full_steps))
+            self.drive(ROTATION_SPEED, -FULL_LOCK, RIGHT_STEP_DURATION)
+            self.drive(-ROTATION_SPEED, -FULL_LOCK, RIGHT_STEP_DURATION)
+            self.stop(0.1)
+
+        if remainder > 0.02:
+            partial = RIGHT_STEP_DURATION * remainder
+            print("[ROT_R] Partial step: " + str(round(partial,3)) + "s")
+            self.drive(ROTATION_SPEED, -FULL_LOCK, partial)
+            self.drive(-ROTATION_SPEED, -FULL_LOCK, partial)
+        self.stop()
+        print("[ROT_R] Complete")
+        
+
+    def rotate_left_90(self):
+        print("[ROT_L90] Calling rotate_left(90)")
+        self.rotate_left(90)
+
+    def rotate_right_90(self):
+        print("[ROT_R90] Calling rotate_right(90)")
+        self.rotate_right(90)
+
+
+def main():
+    print("[MAIN] Starting NanoCar link")
+    print("[MAIN] Config: DRIVE_SPEED=" + str(DRIVE_SPEED) + " CM_PER_SECOND=" + str(CM_PER_SECOND) + " OFFSET_BASE=" + str(DURATION_OFFSET_BASE))
+    car = NanoCarLink()
+    car.connect()
+
+    try:
+        car.establish_connection()
+
+        print("\nChoose test:")
+        print("  1 = move_forward(10cm)")
+        print("  2 = move_backward(10cm)")
+        print("  3 = rotate_left_90")
+        print("  4 = rotate_right_90")
+        print("  5 = rotate_left(360 degrees)")
+        print("  6 = rotate_right(360 degrees)")
+        print("  q = quit")
+    
+        while True:
+            choice = input("> ").strip()
+            if choice == "1":
+                car.move_forward(10)
+            elif choice == "2":
+                car.move_backward(10)
+            elif choice == "3":
+                car.rotate_left_90()
+            elif choice == "4":
+                car.rotate_right_90()
+            elif choice == "5":
+                car.rotate_left(360)
+            elif choice == "6":
+                car.rotate_right(360)
+            elif choice.lower() == "q":
+                break
+            else:
+                print("Unknown option")
+ 
+    except KeyboardInterrupt:
+        print("\n[MAIN] Interrupted by user")
+    finally:
+        car.disconnect()
+        print("[MAIN] Exiting")
+ 
+ 
+if __name__ == "__main__":
+    main()
