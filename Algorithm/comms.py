@@ -2,26 +2,30 @@
 TCP client for sending commands to the relay RPi on the car.
 
 The RPi acts as a WiFi access point. Connect your machine to that network,
-then use CarConnection to send commands. Each command is sent as an ASCII
-string (e.g. "FW050\n") and the RPi replies with "ACK\n" when done.
+then use CarConnection to send commands.
 
-Command wire format:  KIND + 3-digit zero-padded integer value
+Wire protocol (matches RaspberryPi/Robot/server.py):
+  Request  — JSON line:  {"id": <int>, "cmd": "<KIND><3-digit-value>"}
+  Response — JSON:       {"id": <int>, "status": 200, "msg": "<KIND><value> OK"}
+
+Command examples:
   FW050  — move forward 50 cm
   BW020  — move backward 20 cm
   RL090  — rotate left 90 degrees
   RR038  — rotate right 38 degrees
 WAIT commands are simulator-only and are silently skipped.
 """
+import json
 import socket
 from simulator.types import Command
 
 RPI_HOST = '192.168.1.15'
 RPI_PORT = 5000
-_TIMEOUT_S = 30.0  # max seconds to wait for ACK per command
+_TIMEOUT_S = 60.0  # large rotations (e.g. 360°) can take ~24 s
 
 
 def serialize(cmd: Command) -> str | None:
-    """Return wire-format string for cmd, or None if cmd should not be sent."""
+    """Return the bare command string (e.g. 'FW050'), or None for WAIT."""
     if cmd.kind == 'WAIT':
         return None
     return f"{cmd.kind}{round(cmd.value):03d}"
@@ -39,13 +43,12 @@ class CarConnection:
         self._host = host
         self._port = port
         self._sock: socket.socket | None = None
-        self._reader = None
+        self._seq = 0
 
     def connect(self) -> None:
         self._sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self._sock.settimeout(_TIMEOUT_S)
         self._sock.connect((self._host, self._port))
-        self._reader = self._sock.makefile('r')
         print(f"[comms] connected to {self._host}:{self._port}")
 
     def disconnect(self) -> None:
@@ -55,23 +58,32 @@ class CarConnection:
             except OSError:
                 pass
             self._sock = None
-            self._reader = None
             print("[comms] disconnected")
 
     def send_command(self, cmd: Command) -> None:
-        """Send one command and block until ACK is received."""
+        """Send one command and block until the RPi responds with status 200."""
         wire = serialize(cmd)
         if wire is None:
             return
-        self._sock.sendall((wire + '\n').encode())
+        self._seq += 1
+        payload = json.dumps({"id": self._seq, "cmd": wire}) + "\n"
+        self._sock.sendall(payload.encode())
         print(f"[comms] → {wire}", end='  ', flush=True)
-        ack = self._reader.readline().strip()
-        print(f"← {ack}")
-        if ack != 'ACK':
-            raise RuntimeError(f"Expected ACK from RPi, got {ack!r}")
+
+        # RPi sends a JSON response without a trailing newline; use recv() directly.
+        raw = self._sock.recv(4096).decode().strip()
+        try:
+            resp = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            raise RuntimeError(f"Bad response from RPi: {raw!r}") from exc
+
+        status = resp.get("status")
+        print(f"← {status} {resp.get('msg', '')}")
+        if status != 200:
+            raise RuntimeError(f"RPi error {status}: {resp.get('msg')}")
 
     def send_commands(self, cmds: list[Command]) -> None:
-        """Send a sequence of commands, waiting for ACK after each one."""
+        """Send a sequence of commands, waiting for status 200 after each one."""
         total = sum(1 for c in cmds if c.kind != 'WAIT')
         sent = 0
         for cmd in cmds:
