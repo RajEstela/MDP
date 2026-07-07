@@ -5,7 +5,7 @@ import time
 from picamera import PiCamera # Using the Pi's built-in camera library!
 
 # !!! IMPORTANT: CHANGE THIS TO YOUR MACBOOK'S WI-FI IP ADDRESS !!!
-MACBOOK_IP = '10.91.218.239' 
+MACBOOK_IP = '192.168.3.13' 
 PORT = 5005
 
 # 1. Connect to the MacBook
