@@ -38,25 +38,45 @@ def _parse_obstacle(spec: str) -> Obstacle:
     return Obstacle(x=x, y=y, face=face)
 
 
-def _parse_args() -> tuple[bool, Obstacle | None]:
-    """Return (a5_mode, obstacle_or_None) from sys.argv."""
+def _parse_args() -> tuple[list[Obstacle] | None, int]:
+    """Return (fixed_obstacles, n_random).
+
+    fixed_obstacles — use these exact obstacles every run (R resets to same set)
+    n_random        — generate this many random obstacles each run (fixed=None)
+
+    Usage:
+      python -m simulator.main                        # 5 random
+      python -m simulator.main --random 3             # 3 random
+      python -m simulator.main 100,80,N 150,100,E     # exact obstacles
+      python -m simulator.main A5_Test 100,80,N       # single obstacle (A5)
+    """
     args = sys.argv[1:]
     if not args:
-        return False, None
-    mode = args[0].upper().replace('-', '_')
-    if mode in ('A5', 'A5_TEST'):
-        if len(args) < 2:
-            print("Usage: python -m simulator.main A5_Test x,y,Face")
-            print("  e.g. python -m simulator.main A5_Test 100,80,N")
+        return None, 5
+
+    # --random N
+    if args[0] in ('--random', '-n'):
+        if len(args) < 2 or not args[1].isdigit():
+            print("Usage: python -m simulator.main --random <N>")
             sys.exit(1)
+        return None, int(args[1])
+
+    # Backwards compat: leading A5_Test token
+    if args[0].upper().replace('-', '_') in ('A5', 'A5_TEST'):
+        args = args[1:]
+        if not args:
+            print("Usage: python -m simulator.main A5_Test x,y,Face ...")
+            sys.exit(1)
+
+    # One or more obstacle specs
+    obstacles: list[Obstacle] = []
+    for spec in args:
         try:
-            obs = _parse_obstacle(args[1])
+            obstacles.append(_parse_obstacle(spec))
         except ValueError as exc:
-            print(f"Bad obstacle spec: {exc}")
+            print(f"Bad obstacle spec {spec!r}: {exc}")
             sys.exit(1)
-        return True, obs
-    print(f"Unknown mode {args[0]!r}. Run without arguments for random 5-obstacle mode.")
-    sys.exit(1)
+    return obstacles, len(obstacles)
 
 
 def _text(surface, font, msg, color, pos):
@@ -127,10 +147,15 @@ def _compute(screen, font_b, obstacles):
 
 
 def main() -> None:
-    a5_mode, a5_obstacle = _parse_args()
+    fixed_obstacles, n_random = _parse_args()
+    fixed = fixed_obstacles is not None
 
     pygame.init()
-    title = "MDP Simulator — A5 Test" if a5_mode else "MDP Simulator — Optimal Hamiltonian Path"
+    if fixed:
+        n = len(fixed_obstacles)
+        title = f"MDP Simulator — {n} obstacle{'s' if n != 1 else ''} (fixed)"
+    else:
+        title = f"MDP Simulator — {n_random} random obstacle{'s' if n_random != 1 else ''}"
     screen = pygame.display.set_mode((ARENA_PX, ARENA_PX))
     pygame.display.set_caption(title)
     clock = pygame.time.Clock()
@@ -138,7 +163,7 @@ def main() -> None:
     font_b = pygame.font.SysFont('Arial', 18, bold=True)
 
     def new_run():
-        obs = [a5_obstacle] if a5_mode else generate_random_obstacles()
+        obs = fixed_obstacles if fixed else generate_random_obstacles(n_random)
         rts, trc, opt_c, opt_l = _compute(screen, font_b, obs)
         robot = RobotState(x=START_X_CM, y=START_Y_CM, theta=START_THETA)
         return obs, rts, trc, opt_c, opt_l, robot, list(opt_c), None, 0.0, 0, 0
@@ -146,8 +171,8 @@ def main() -> None:
     obstacles, routes, traced, opt_cmds, opt_len, \
         state, queue, active, remaining, anim_frames, obstacles_visited = new_run()
 
-    # A5 mode: skip comparison phases and go straight to animation
-    phase        = 'animate' if a5_mode else 'show_all'
+    # Fixed obstacles: skip comparison, animate immediately
+    phase        = 'animate' if fixed else 'show_all'
     phase_frames = 0
     paused       = False
 
@@ -163,7 +188,7 @@ def main() -> None:
                 elif event.key == pygame.K_r:
                     obstacles, routes, traced, opt_cmds, opt_len, \
                         state, queue, active, remaining, anim_frames, obstacles_visited = new_run()
-                    phase = 'animate' if a5_mode else 'show_all'
+                    phase = 'animate' if fixed else 'show_all'
                     phase_frames = 0
                     paused = False
                 elif event.key == pygame.K_SPACE:
