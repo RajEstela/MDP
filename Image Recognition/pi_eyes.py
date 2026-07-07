@@ -5,7 +5,7 @@ import struct
 # !!! IMPORTANT: CHANGE THIS TO YOUR MACBOOK'S WI-FI IP ADDRESS !!!
 # MACBOOK_IP = '192.168.1.100' 
 MACBOOK_IP = '10.91.218.239' 
-PORT = 5000
+PORT = 5005
 
 # 1. Connect to the MacBook
 client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)

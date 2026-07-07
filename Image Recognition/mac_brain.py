@@ -9,8 +9,10 @@ model = YOLO("best.pt")
 
 # 2. Setup the Wi-Fi Server (Listens on Port 5000)
 server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+
+server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
 # '0.0.0.0' means it listens to any device connected to the Mac's network
-server_socket.bind(('0.0.0.0', 5000))
+server_socket.bind(('0.0.0.0', 5005))
 server_socket.listen(1)
 
 print("MacBook Brain is active! Waiting for Raspberry Pi to connect...")
