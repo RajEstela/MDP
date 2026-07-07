@@ -3,15 +3,17 @@ Compute the optimal path and send all commands to the car via WiFi.
 
 Run from the Algorithm/ directory:
 
-  Full run (uses OBSTACLES list in simulator/planner.py):
+  Use hardcoded OBSTACLES in simulator/planner.py:
     python send_to_car.py
 
-  A5 single-obstacle test:
-    python send_to_car.py A5_Test 100,80,N
-    python send_to_car.py A5_Test "Obstacle(100,80,N)"
+  Pass one or more obstacles on the command line:
+    python send_to_car.py 100,80,N
+    python send_to_car.py 100,80,N 150,100,E 50,120,S
 
-  x, y are cm from the bottom-left corner of the arena.
-  Face is N / S / E / W.
+  Add --dry-run to print commands without connecting:
+    python send_to_car.py 100,80,N --dry-run
+
+  Format: x,y,Face  where x/y are cm from bottom-left and Face is N/S/E/W.
 """
 import sys
 
@@ -35,35 +37,40 @@ def _parse_obstacle(spec: str) -> Obstacle:
 
 def _parse_args() -> tuple[list[Obstacle], bool]:
     """Returns (obstacles, dry_run)."""
-    args = [a for a in sys.argv[1:] if a != '--dry-run']
-    dry_run = '--dry-run' in sys.argv[1:]
+    raw = sys.argv[1:]
+    dry_run = '--dry-run' in raw
+    args = [a for a in raw if a != '--dry-run']
 
     if not args:
         return OBSTACLES, dry_run
-    mode = args[0].upper().replace('-', '_')
-    if mode in ('A5', 'A5_TEST'):
-        if len(args) < 2:
-            print("Usage: python send_to_car.py A5_Test x,y,Face [--dry-run]")
+
+    # Backwards compat: allow leading 'A5_Test' / 'A5' token
+    if args[0].upper().replace('-', '_') in ('A5', 'A5_TEST'):
+        args = args[1:]
+        if not args:
+            print("Usage: python send_to_car.py A5_Test x,y,Face ...")
             print("  e.g. python send_to_car.py A5_Test 100,80,N")
             sys.exit(1)
+
+    obstacles: list[Obstacle] = []
+    for spec in args:
         try:
-            return [_parse_obstacle(args[1])], dry_run
+            obstacles.append(_parse_obstacle(spec))
         except ValueError as exc:
-            print(f"Bad obstacle spec: {exc}")
+            print(f"Bad obstacle spec {spec!r}: {exc}")
             sys.exit(1)
-    print(f"Unknown mode {args[0]!r}. Run without arguments for full 5-obstacle run.")
-    sys.exit(1)
+    return obstacles, dry_run
 
 
 def main() -> None:
     obstacles, dry_run = _parse_args()
-    label = "A5 test" if len(obstacles) == 1 else f"{len(obstacles)}-obstacle run"
+    n = len(obstacles)
+    label = f"{n} obstacle{'s' if n != 1 else ''}"
     if dry_run:
         label += " [DRY RUN]"
     print(f"[{label}] Computing optimal path...")
-    if len(obstacles) == 1:
-        obs = obstacles[0]
-        print(f"  Obstacle: x={obs.x} y={obs.y} face={obs.face}")
+    for i, obs in enumerate(obstacles):
+        print(f"  [{i+1}] x={obs.x} y={obs.y} face={obs.face}")
 
     cmds = get_commands(obstacles)
     movement_cmds = [c for c in cmds if c.kind != 'WAIT']
