@@ -33,18 +33,21 @@ def _parse_obstacle(spec: str) -> Obstacle:
     return Obstacle(x=x, y=y, face=face)
 
 
-def _parse_args() -> list[Obstacle]:
-    args = sys.argv[1:]
+def _parse_args() -> tuple[list[Obstacle], bool]:
+    """Returns (obstacles, dry_run)."""
+    args = [a for a in sys.argv[1:] if a != '--dry-run']
+    dry_run = '--dry-run' in sys.argv[1:]
+
     if not args:
-        return OBSTACLES
+        return OBSTACLES, dry_run
     mode = args[0].upper().replace('-', '_')
     if mode in ('A5', 'A5_TEST'):
         if len(args) < 2:
-            print("Usage: python send_to_car.py A5_Test x,y,Face")
+            print("Usage: python send_to_car.py A5_Test x,y,Face [--dry-run]")
             print("  e.g. python send_to_car.py A5_Test 100,80,N")
             sys.exit(1)
         try:
-            return [_parse_obstacle(args[1])]
+            return [_parse_obstacle(args[1])], dry_run
         except ValueError as exc:
             print(f"Bad obstacle spec: {exc}")
             sys.exit(1)
@@ -53,8 +56,10 @@ def _parse_args() -> list[Obstacle]:
 
 
 def main() -> None:
-    obstacles = _parse_args()
+    obstacles, dry_run = _parse_args()
     label = "A5 test" if len(obstacles) == 1 else f"{len(obstacles)}-obstacle run"
+    if dry_run:
+        label += " [DRY RUN]"
     print(f"[{label}] Computing optimal path...")
     if len(obstacles) == 1:
         obs = obstacles[0]
@@ -64,6 +69,13 @@ def main() -> None:
     movement_cmds = [c for c in cmds if c.kind != 'WAIT']
     print(f"  {len(movement_cmds)} movement commands "
           f"({len(cmds) - len(movement_cmds)} WAIT steps skipped)")
+
+    if dry_run:
+        print("Commands that would be sent:")
+        for c in movement_cmds:
+            print(f"  {c.kind}{round(c.value):03d}")
+        print("Dry run complete — no connection made.")
+        return
 
     with CarConnection() as car:
         car.send_commands(cmds)
