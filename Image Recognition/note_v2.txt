@@ -1,0 +1,265 @@
+pc_infer_server.py + pi_stream_frames.py - setup log and run instructions
+============================================================
+
+CONFIRMED RPi hotspot credentials (as of the last test):
+    SSID: MDPGrp3
+    Wi-Fi password: 2026Grp3
+    RPi IP on that hotspot: 192.168.3.3
+    SSH user: pi
+    SSH password: raspberry
+Note: the Wi-Fi password and the SSH password are DIFFERENT things - the
+Wi-Fi password just gets your Mac onto the network, the SSH password logs
+you into the pi user account on the RPi itself.
+
+IMPORTANT: your Mac must be connected to the MDPGrp3 Wi-Fi (not your home/
+school internet Wi-Fi) for ANY of ssh/scp/the live run below to work -
+they're separate networks and your home router has no route to
+192.168.3.x. If a command below hangs or refuses, check your Mac's Wi-Fi
+is on MDPGrp3 first.
+
+============================================================
+QUICK START - run the real thing
+============================================================
+Confirmed values as of the last check:
+    Mac's IP on MDPGrp3: 192.168.3.13
+    RPi's IP (SSH target): 192.168.3.3
+
+1. Connect the Mac's Wi-Fi to MDPGrp3 FIRST (must be listening before the
+   RPi tries to connect to it).
+
+2. In a Terminal window on the Mac (NOT inside any SSH session):
+       cd /Users/weinam/Documents/SC2079
+       python3 pc_infer_server.py --serve --port 5006
+   Prints "Waiting for the RPi to connect on port 5006..." and blocks -
+   this is expected, leave it running.
+   (--conf defaults to 0.2 now - see "Tuning" section below to adjust.)
+
+3. In a SEPARATE Terminal window on the Mac, SSH into the RPi:
+       ssh pi@192.168.3.3
+   (password: raspberry)
+
+4. Inside that SSH session, run:
+       python3 pi_stream_frames.py --host 192.168.3.13 --port 5006 --brightness 60
+   RPi camera turns on and streams continuously.
+   (--brightness 60 confirmed as a good value - well-exposed image, no
+   longer dark/washed out. Re-run "scp pi_stream_frames.py" to the RPi
+   first if you get "unrecognized arguments: --brightness" - the RPi's
+   copy needs to be up to date, see the "Keeping the RPi copy in sync"
+   note further down.)
+
+Expected result: the Mac's terminal (from step 2) opens a live window
+showing the RPi's camera feed with bounding boxes + target IDs drawn on
+it in real time (best.pt running on the Mac). The RPi's terminal (step 4)
+prints a friendly line whenever something is detected, e.g.:
+    [PC] Detected: ID 12 (Alphabet W)
+and the Mac's terminal prints:
+    Detected: ID 12 (Alphabet W)  [58% confidence]
+
+To stop: Ctrl+C in the RPi terminal (step 4) first, then Ctrl+C or 'q' in
+the Mac's video window.
+
+If the Mac's IP changes (e.g. reconnecting to MDPGrp3 gives a different
+address), re-run "ipconfig getifaddr en0" on the Mac and use that new
+value for --host in step 4 instead.
+============================================================
+
+Tuning (based on first real test - dark image, false positives on
+legs/chairs, and the printout format)
+----------------------------------------------
+1. FALSE POSITIVES (legs/chair flagged as targets): the confidence
+   threshold defaulted to 0.12 (12%) originally, way too permissive.
+   Default is now 0.2 in pc_infer_server.py. Adjust live without editing
+   code:
+       python3 pc_infer_server.py --serve --port 5006 --conf 0.3
+   Raise further (e.g. 0.4, 0.5) if false positives continue; lower it if
+   real targets stop being picked up. Applies to both --serve and
+   standalone modes.
+
+2. DARK CAMERA IMAGE (Pi Camera Module / CSI): added best-effort
+   --brightness and --exposure flags to pi_stream_frames.py.
+   CONFIRMED WORKING VALUE: --brightness 60 - tested and gives a
+   well-exposed image (no longer dark/washed out), now the default used
+   in the Quick Start command above:
+       python3 pi_stream_frames.py --host 192.168.3.13 --port 5006 --brightness 60
+   The script prints back what value the driver actually reports after
+   setting it - if it doesn't change, this OpenCV/V4L2 property isn't
+   well supported by the bcm2835-v4l2 driver on this OS, and the more
+   reliable fallback is to set it directly via v4l2-ctl instead:
+       v4l2-ctl --list-ctrls -d /dev/video0     # see available controls + ranges
+       v4l2-ctl -d /dev/video0 --set-ctrl=brightness=60
+   (exact control names/ranges vary - list-ctrls shows what's actually
+   available on this specific camera/driver.)
+   Sharpness: the confirmed snapshot at --brightness 60 looked sharp
+   (legible "8" digit, clear wood-grain background texture) - no evidence
+   of blur, so no sharpness-specific tuning needed for now. Focus was
+   separately confirmed sharp at 20cm too, so this isn't a lens issue.
+
+3. FLICKERING BOUNDING BOX at 50cm (box appears/disappears frame to
+   frame): this is normal single-frame confidence variance - a real
+   target sitting right at the edge of the model's confidence threshold
+   will flicker in and out as lighting/angle/frame noise shifts slightly
+   frame to frame. Two options once you're ready to address it:
+     - Quick lever: lower --conf slightly (e.g. 0.15) if the target itself
+       is correct but marginal - trades off against false positives from
+       item #1.
+     - Better fix (not yet implemented, revisit once lighting/focus fully
+       settled): add debounce logic that only reports a detection once
+       the SAME target ID appears consistently across several consecutive
+       frames, instead of reacting to any single frame's best guess. This
+       smooths out flicker AND helps filter one-off background
+       misclassifications (e.g. the cupboard false positive at 20cm).
+
+4. WIRE PROTOCOL CLARIFICATION (what "IMGRES,0,12" means):
+   Format: IMGRES,<obstacleId>,<targetID>
+     - obstacleId: which obstacle number the robot is currently in front
+       of. Currently always "0" because this is a camera-only test with
+       no real obstacle sequence yet - it becomes meaningful once wired
+       to P1/P4's real algorithm/hub code (each obstacle gets its own ID
+       during the actual run). This is still sent on the wire for that
+       future integration, just no longer shown in the friendly console
+       print since it's not meaningful yet.
+     - targetID: the recognised image ID from the confirmed table (e.g.
+       12 = Alphabet W, 100 = Bullseye).
+   The confidence number (e.g. 0.12 in "conf 0.12") IS the model's
+   confidence level - 0.12 = 12% confident. Combined with the old 0.12
+   threshold, this meant the lowest possible passing detections were
+   being shown, hence the false positives - fixed by #1 above.
+
+5. PRINTOUT FORMAT (updated): both scripts now show the image's
+   description alongside its ID, and confidence as a percentage, e.g.:
+       Detected: ID 12 (Alphabet W)  [58% confidence]
+       Detected: ID 100 (Bullseye)  [71% confidence]
+   The raw obstacle_id placeholder is no longer shown in this line (see
+   #4), but is still sent correctly in the underlying IMGRES wire message
+   for the real robot logic to use later.
+
+Setup already completed (reference only - don't need to redo unless
+starting fresh on a new SD card / new Mac)
+----------------------------------------------
+1. Got the RPi hotspot SSID/password/IP/SSH creds from the team (see top
+   of this file).
+2. Connected the Mac's Wi-Fi to MDPGrp3.
+3. SSH'd in: ssh pi@192.168.3.3 (password: raspberry).
+4. Copied the script over:
+       scp /Users/weinam/Documents/SC2079/pi_stream_frames.py pi@192.168.3.3:~/
+5. Found the Mac's own IP on the MDPGrp3 subnet (run on the Mac, NOT
+   inside the SSH session - ipconfig doesn't exist on the RPi's Linux
+   shell anyway):
+       ipconfig getifaddr en0   ->   192.168.3.13
+   (if en0 gives nothing, try en1)
+
+Keeping the RPi copy in sync
+----------------------------------------------
+pi_stream_frames.py only exists on the Mac as the "source of truth" -
+whenever it gets updated (new flags, bug fixes, etc.), the copy already
+sitting on the RPi does NOT update itself. Re-copy it before the next test
+run whenever it's changed:
+    scp /Users/weinam/Documents/SC2079/pi_stream_frames.py pi@192.168.3.3:~/share/
+(adjust the destination path to wherever you're actually running it from
+on the RPi - confirmed as ~/share/ based on the last test session.)
+If you run the script and get "error: unrecognized arguments: --X", that
+almost always means the RPi's copy is stale - re-run the scp above first.
+pc_infer_server.py doesn't have this issue since it only ever runs on the
+Mac, where you're editing the file directly.
+
+RPi dependency setup (Python 3.7.3, opencv-python==4.5.3.56)
+----------------------------------------------
+On the RPi - it only ever needs opencv-python, never ultralytics/PyTorch.
+FULLY RESOLVED - python3 -c "import cv2; print(cv2.__version__)" -> 4.5.3
+
+What it took to get there (keep this order if setting up another Pi/SD
+card the same way):
+1. pip3 install opencv-python (no version pin) failed with
+   "Temporary failure in name resolution" - the RPi had no internet
+   because its Wi-Fi radio (wlan0) was busy running the MDPGrp3 hotspot
+   and wasn't also connected out to the internet.
+   FIX: plugged in an Ethernet cable to a router/switch with internet -
+   this gives the Pi internet via eth0 while wlan0 keeps running the
+   MDPGrp3 hotspot independently, without disrupting the existing SSH
+   connection over Wi-Fi.
+2. With internet up, "pip3 install opencv-python" (latest, no pin) then
+   failed differently - pip couldn't find a prebuilt piwheels wheel for
+   the latest version on this Python 3.7.3/armv7l Pi, so it fell back to
+   building from source, which failed needing cmake (a rabbit hole to
+   avoid - don't try to install cmake/build tools, just pin the version
+   instead, see step 4).
+3. Tried "sudo apt install python3-opencv" as an alternative - failed with
+   unmet dependencies (unrelated broken/stale apt package list on this
+   old RPi OS install). Not worth debugging further given the deadline -
+   abandoned in favour of pip.
+4. Pinned to an older opencv-python version known to have a prebuilt
+   piwheels wheel for Python 3.7/armv7l:
+       pip3 install opencv-python==4.5.3.56
+   pip install itself succeeded, but "import cv2" then failed with:
+       ImportError: libavcodec.so.58: cannot open shared object file
+   (the pip wheel doesn't bundle system ffmpeg libs - those have to
+   already exist on the OS).
+5. Fixing the ffmpeg libs took a few rounds because this RPi's apt sources
+   only has the plain Raspbian archive (legacy.raspbian.org), but 3 of the
+   needed libs (libavutil56, libswresample3, libswscale5) had previously
+   been installed at a "+rpt1" (Raspberry Pi Foundation rebuild) version
+   from a repo no longer in sources.list - a stuck partial-upgrade state.
+   FIX THAT WORKED: force all 5 related ffmpeg libs to the one consistent
+   version actually available (plain deb10u1, no +rpt1), rather than
+   dist-upgrading the whole system (too broad/risky on a shared team Pi):
+       sudo apt-get install -y --allow-downgrades \
+         libavutil56=7:4.1.11-0+deb10u1 \
+         libswresample3=7:4.1.11-0+deb10u1 \
+         libswscale5=7:4.1.11-0+deb10u1 \
+         libavcodec58=7:4.1.11-0+deb10u1 \
+         libavformat58=7:4.1.11-0+deb10u1
+   Also installed (turned out to be needed too, no conflicts):
+       sudo apt-get install -y libgtk2.0-0 libqtgui4 libqt4-test libjasper1 libhdf5-103
+6. Last error after that: "import cv2" failed with
+       RuntimeError: module compiled against API version 0xe but this
+       version of numpy is 0xd
+       ImportError: numpy.core.multiarray failed to import
+   The system's numpy (1.16.2) was too old for this opencv build.
+   FIX THAT WORKED:
+       pip3 install --upgrade numpy
+   This installs a newer numpy into the user's ~/.local site-packages,
+   which takes priority over the old system one, without touching the
+   system-wide numpy package other scripts might depend on.
+
+Troubleshooting (if the Quick Start run above doesn't work)
+----------------------------------------------
+- Connection refused: wrong IP, or Mac/RPi not on same subnet (check both
+  are on MDPGrp3), or macOS firewall blocking - the first time
+  pc_infer_server.py --serve binds a listening socket, macOS may prompt
+  "Do you want the incoming network connection to be accepted?" - click
+  Allow. Try "ping 192.168.3.13" from the RPi to sanity-check the route.
+- Very laggy/choppy video: reduce --jpeg-quality (default 70) or
+  --resize-width (default 416) on the pi_stream_frames.py side - smaller
+  frames = faster over Wi-Fi.
+- No detections ever, even up close: confirm lighting/distance matches the
+  20-50 cm standoff the model was trained/tested at.
+- If the RPi camera doesn't open at all: it likely needs enabling first:
+      sudo raspi-config
+      # Interfacing Options -> Camera -> Enable
+      sudo reboot
+- No-display camera check (no monitor, no X11 forwarding on the RPi):
+      python3 pi_stream_frames.py --snapshot snapshot.jpg
+  then from the Mac: scp pi@192.168.3.3:~/snapshot.jpg . and open it.
+
+What --serve and --host actually mean
+----------------------------------------------
+--serve (on pc_infer_server.py, runs on the Mac): by default (no flags),
+pc_infer_server.py just opens the Mac's OWN webcam and runs YOLO on it
+(same as detect_live_v2_test.py). --serve switches it into network-
+listener mode instead - it opens a TCP socket and waits for something (the
+RPi) to connect and send frames over the network.
+
+--host (on pi_stream_frames.py, runs on the RPi): tells the RPi where to
+send its camera frames to - the IP address of whichever machine is running
+pc_infer_server.py --serve. Without --host, the script just does
+--local-preview (or --snapshot) and never touches the network.
+
+Put together:
+  Mac (--serve) = the server: sits waiting, does the actual YOLO
+  inference, shows the annotated window.
+  RPi (--host <mac-ip>) = the client: actively connects out to the Mac
+  and pushes its camera frames there.
+
+This is also why the order matters: the server (--serve) needs to be up
+and listening BEFORE the client (--host) tries to connect, otherwise the
+RPi gets "connection refused."
