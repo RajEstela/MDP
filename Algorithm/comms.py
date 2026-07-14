@@ -19,9 +19,7 @@ import json
 import socket
 from simulator.types import Command
 
-RPI_HOST = '192.168.3.3'
-RPI_PORT = 5000
-_TIMEOUT_S = 60.0  # large rotations (e.g. 360°) can take ~24 s
+from app_config import RPI_HOST, RPI_PORT, RPI_TIMEOUT_S as _TIMEOUT_S
 
 
 def serialize(cmd: Command) -> str | None:
