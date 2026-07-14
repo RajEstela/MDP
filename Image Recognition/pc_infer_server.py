@@ -48,6 +48,29 @@ def send_car_command(host: str, port: int, command: str) -> None:
         raise RuntimeError(response.get("msg", "car rejected the command"))
 
 
+def drain_buffered_frames(sock: socket.socket, reader) -> int:
+    """Discard any frames already buffered locally (non-blocking), so the
+    next frame processed after a maneuver reflects the robot's current
+    position rather than a stale frame captured before it moved.
+
+    Returns the number of frames discarded.
+    """
+    drained = 0
+    sock.setblocking(False)
+    try:
+        while True:
+            try:
+                line = reader.readline()
+            except (BlockingIOError, OSError):
+                break
+            if not line:
+                break
+            drained += 1
+    finally:
+        sock.setblocking(True)
+    return drained
+
+
 def run_standalone(conf: float):
     model = YOLO(MODEL_PATH)
     cap = cv2.VideoCapture(0)
