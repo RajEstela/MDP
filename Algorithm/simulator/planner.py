@@ -2,16 +2,11 @@ import itertools
 import math
 import random as _random
 
+from app_config import DEFAULT_OBSTACLES
 from simulator.config import APPROACH_CM, ARENA_CM, CELL_CM, FPS, GRID_SIZE, START_THETA, START_X_CM, START_Y_CM
 from simulator.types import Command, Obstacle, RobotState
 
-OBSTACLES: list[Obstacle] = [
-    Obstacle(x=50,  y=100, face='N'),
-    Obstacle(x=110, y=100, face='E'),
-    Obstacle(x=50,  y=160, face='S'),
-    Obstacle(x=110, y=160, face='W'),
-    Obstacle(x=170, y=60,  face='N'),
-]
+OBSTACLES: list[Obstacle] = DEFAULT_OBSTACLES
 
 def _valid_faces(col: int, row: int) -> list[str]:
     """Return face directions whose grid-aligned approach pose fits inside the arena with ≥30 cm boundary margin."""
