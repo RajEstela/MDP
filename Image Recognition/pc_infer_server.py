@@ -8,6 +8,14 @@ import cv2
 import numpy as np
 from ultralytics import YOLO
 
+from face_maneuver import (
+    APPROACH_CM,
+    DEFAULT_FACE_STEP_CM,
+    MAX_FACE_ATTEMPTS,
+    OBSTACLE_HALF_WIDTH_CM,
+    build_face_change_commands,
+)
+
 MODEL_PATH = "best.pt"
 
 # Confirmed lab image-ID table: 1-9, 10='zero', 11='V'...15='Z', bullseye=100.
@@ -17,8 +25,6 @@ MODEL_PATH = "best.pt"
 # class_id to an ID directly.
 BULLSEYE_ID = 100
 CAR_PORT = 5000
-DEFAULT_SCAN_DEGREES = 30
-SCAN_DIRECTIONS = ("RR", "RL", "RL")
 
 ID_DESCRIPTIONS = {
     1: "Up arrow", 2: "down arrow", 3: "right arrow", 4: "left arrow",
@@ -96,7 +102,7 @@ def run_standalone(conf: float):
     cv2.destroyAllWindows()
 
 
-def run_serve(port: int, conf: float, car_port: int, scan_degrees: int):
+def run_serve(port: int, conf: float, car_port: int, face_step_cm: int):
     model = YOLO(MODEL_PATH)
 
     server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -108,7 +114,8 @@ def run_serve(port: int, conf: float, car_port: int, scan_degrees: int):
     conn, addr = server.accept()
     print(f"RPi connected from {addr}")
     reader = conn.makefile("rb")
-    scan_step = 0
+    faces_checked = 0
+    gave_up = False
 
     print("Streaming live. Press 'q' in the video window to quit.")
     try:
@@ -163,18 +170,38 @@ def run_serve(port: int, conf: float, car_port: int, scan_degrees: int):
                 conn.sendall(reply)
 
                 if target_id == BULLSEYE_ID:
-                    direction = SCAN_DIRECTIONS[scan_step]
-                    command = f"{direction}{scan_degrees:03d}"
-                    print(f"Bullseye scan: sending {command} to the car...")
-                    try:
-                        send_car_command(addr[0], car_port, command)
-                    except (ConnectionError, OSError, RuntimeError, ValueError, json.JSONDecodeError) as exc:
-                        print(f"Bullseye scan movement failed: {exc}")
+                    if gave_up:
+                        pass  # already exhausted all faces for this obstacle - keep
+                              # logging detections, but stop attempting to move
                     else:
-                        scan_step = (scan_step + 1) % len(SCAN_DIRECTIONS)
-                elif scan_step:
+                        print(f"Bullseye scan: repositioning to next face "
+                              f"(attempt {faces_checked + 1}/{MAX_FACE_ATTEMPTS})...")
+                        maneuver_ok = True
+                        for command in build_face_change_commands(face_step_cm):
+                            print(f"Bullseye scan: sending {command} to the car...")
+                            try:
+                                send_car_command(addr[0], car_port, command)
+                            except (ConnectionError, OSError, RuntimeError, ValueError,
+                                    json.JSONDecodeError) as exc:
+                                print(f"Bullseye scan movement failed: {exc}")
+                                maneuver_ok = False
+                                break
+
+                        drained = drain_buffered_frames(conn, reader)
+                        if drained:
+                            print(f"Bullseye scan: discarded {drained} stale frame(s) "
+                                  f"buffered during the maneuver.")
+
+                        if maneuver_ok:
+                            faces_checked += 1
+                            if faces_checked >= MAX_FACE_ATTEMPTS:
+                                gave_up = True
+                                print("Checked all 4 faces, no target image found "
+                                      "— giving up on this obstacle.")
+                elif faces_checked or gave_up:
                     print("Non-bullseye object found; bullseye scan complete.")
-                    scan_step = 0
+                    faces_checked = 0
+                    gave_up = False
 
             if cv2.waitKey(1) & 0xFF == ord('q'):
                 break
@@ -198,8 +225,11 @@ def main():
         help="Raspberry Pi movement-server port used for bullseye scanning."
     )
     parser.add_argument(
-        "--scan-degrees", type=int, default=DEFAULT_SCAN_DEGREES,
-        help="Degrees to rotate for each right/left bullseye scan step."
+        "--face-step-cm", type=int, default=DEFAULT_FACE_STEP_CM,
+        help="Distance in cm to drive during each leg of the face-change maneuver when a Bullseye "
+             f"is detected. Defaults to {DEFAULT_FACE_STEP_CM} (matches a "
+             f"{OBSTACLE_HALF_WIDTH_CM * 2}cm obstacle with a {APPROACH_CM}cm standoff). Tune this "
+             "if your rig's obstacle size or standoff distance differs."
     )
     parser.add_argument(
         "--conf", type=float, default=0.2,
@@ -208,11 +238,11 @@ def main():
     )
     args = parser.parse_args()
 
-    if not 1 <= args.scan_degrees <= 359:
-        parser.error("--scan-degrees must be between 1 and 359")
+    if args.face_step_cm <= 0:
+        parser.error("--face-step-cm must be positive")
 
     if args.serve:
-        run_serve(args.port, args.conf, args.car_port, args.scan_degrees)
+        run_serve(args.port, args.conf, args.car_port, args.face_step_cm)
     else:
         run_standalone(args.conf)
 
