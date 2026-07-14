@@ -21,6 +21,7 @@ LEFT_STEP_DURATION = 0.455
 RIGHT_STEP_DURATION = 0.475
 DEGREES_PER_STEP = 15.0
 SEND_INTERVAL = 0.01
+MANUAL_DRIVE_TIMEOUT = 0.5
 
 DURATION_OFFSET_BASE = 0.12
 FORWARD_OFFSET_ANGLE = 190
@@ -46,6 +47,7 @@ class NanoCarLink:
         self.running = False
         self._thread = None
         self._lock = threading.Lock()
+        self._manual_drive_deadline = None
 
     def connect(self):
         print("[CONNECT] Opening serial port " + self.port + " at " + str(self.baud) + " baud...")
@@ -70,9 +72,20 @@ class NanoCarLink:
         self.running = True
         def heartbeat():
             while self.running:
+                timed_out = False
                 with self._lock:
+                    if (
+                        self._manual_drive_deadline is not None
+                        and time.monotonic() >= self._manual_drive_deadline
+                    ):
+                        self.current_x = 0
+                        self.current_z = 0
+                        self._manual_drive_deadline = None
+                        timed_out = True
                     x = self.current_x
                     z = self.current_z
+                if timed_out:
+                    print("[MANUAL] Command timeout - stopped")
                 self._send_now(x, z)
                 time.sleep(SEND_INTERVAL)
         self._thread = threading.Thread(target=heartbeat, daemon=True)
@@ -89,6 +102,20 @@ class NanoCarLink:
         with self._lock:
             self.current_x = x_speed
             self.current_z = z_angle
+            self._manual_drive_deadline = None
+
+    def set_manual_drive(self, x_speed, z_angle):
+        x_speed = max(-1000, min(1000, int(x_speed)))
+        z_angle = max(-1000, min(1000, int(z_angle)))
+        print("[MANUAL] x=" + str(x_speed) + " z=" + str(z_angle))
+        with self._lock:
+            self.current_x = x_speed
+            self.current_z = z_angle
+            self._manual_drive_deadline = (
+                time.monotonic() + MANUAL_DRIVE_TIMEOUT
+                if x_speed != 0 or z_angle != 0
+                else None
+            )
 
     def drive(self, x_speed, z_angle, duration):
         print("[DRIVE] x=" + str(x_speed) + " z=" + str(z_angle) + " for " + str(round(duration, 3)) + "s")
