@@ -2,3 +2,5 @@
 **/*.pyc
 **/*.pyo
 .pytest_cache/
+build/
+*.spec
