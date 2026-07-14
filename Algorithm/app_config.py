@@ -52,17 +52,33 @@ def config_dir() -> Path:
 
 def _deep_merge(defaults: dict, overrides: dict) -> dict:
     """Merge `overrides` onto `defaults`, recursing into nested dicts.
-    Non-dict values (including lists) are replaced wholesale when present in overrides."""
+    Non-dict values (including lists) are replaced wholesale when present in overrides.
+    If a section is a dict in `defaults` but overridden with a non-dict scalar, the
+    override is rejected (with a warning) and the default section is kept, so callers
+    downstream can always rely on the shape of nested sections matching DEFAULTS."""
     merged = {}
     for key, default_val in defaults.items():
         override_val = overrides.get(key)
         if isinstance(default_val, dict) and isinstance(override_val, dict):
             merged[key] = _deep_merge(default_val, override_val)
+        elif isinstance(default_val, dict) and key in overrides:
+            print(f"[app_config] '{key}' override is not a mapping — keeping built-in defaults for that section")
+            merged[key] = default_val
         elif key in overrides:
             merged[key] = override_val
         else:
             merged[key] = default_val
     return merged
+
+
+def _valid_default_obstacles(value) -> bool:
+    """True if `value` is a list of dicts each containing 'x', 'y', and 'face'."""
+    if not isinstance(value, list):
+        return False
+    return all(
+        isinstance(entry, dict) and {'x', 'y', 'face'} <= entry.keys()
+        for entry in value
+    )
 
 
 def load_config(path: Path) -> dict:
@@ -77,10 +93,21 @@ def load_config(path: Path) -> dict:
     try:
         with open(path, 'r') as f:
             raw = yaml.safe_load(f) or {}
-    except yaml.YAMLError as exc:
-        print(f"[app_config] failed to parse {path}: {exc} — using built-in defaults")
+    except (yaml.YAMLError, OSError) as exc:
+        print(f"[app_config] failed to read/parse {path}: {exc} — using built-in defaults")
         return DEFAULTS
-    return _deep_merge(DEFAULTS, raw)
+
+    if not isinstance(raw, dict):
+        print(f"[app_config] {path} does not contain a mapping at the top level — using built-in defaults")
+        return DEFAULTS
+
+    merged = _deep_merge(DEFAULTS, raw)
+
+    if not _valid_default_obstacles(merged.get('default_obstacles')):
+        print(f"[app_config] 'default_obstacles' in {path} is malformed — using built-in defaults for that section")
+        merged['default_obstacles'] = DEFAULTS['default_obstacles']
+
+    return merged
 
 
 _cfg = load_config(config_dir() / 'config.yaml')
