@@ -28,9 +28,13 @@ FORWARD_OFFSET_ANGLE = 190
 BACKWARD_OFFSET_ANGLE = -220
 
 
+def _packet_value(value):
+    return int(round(max(-1000, min(1000, value))))
+
+
 def build_packet(x_speed, z_angle):
-    x_speed = max(-1000, min(1000, x_speed))
-    z_angle = max(-1000, min(1000, z_angle))
+    x_speed = _packet_value(x_speed)
+    z_angle = _packet_value(z_angle)
     x_b = struct.pack(">h", x_speed)
     y_b = struct.pack(">h", 0)
     z_b = struct.pack(">h", z_angle)
@@ -141,71 +145,71 @@ class NanoCarLink:
         print("[CONN] Ready.")
 
         
-    def move_forward(self, cm):
+    def move_forward(self, cm, offset_angle=FORWARD_OFFSET_ANGLE, cm_per_second=CM_PER_SECOND):
         segment = 30.0  # drive in 30cm chunks
         full = int(cm / segment)
         remainder = cm % segment
         for i in range(full):
-            self.drive(DRIVE_SPEED, FORWARD_OFFSET_ANGLE, segment / CM_PER_SECOND)
+            self.drive(DRIVE_SPEED, offset_angle, segment / cm_per_second)
             self.stop(0.1)
         if remainder > 0:
             offset = 0
             if cm <= segment:
                 offset = DURATION_OFFSET_BASE
-            duration = remainder / CM_PER_SECOND + offset
-            self.drive(DRIVE_SPEED, FORWARD_OFFSET_ANGLE, duration)
+            duration = remainder / cm_per_second + offset
+            self.drive(DRIVE_SPEED, offset_angle, duration)
         self.stop()
 
-    def move_backward(self, cm):
+    def move_backward(self, cm, offset_angle=BACKWARD_OFFSET_ANGLE, cm_per_second=CM_PER_SECOND):
         segment = 30.0  # drive in 30cm chunks
         full = int(cm / segment)
         remainder = cm % segment
         for i in range(full):
-            self.drive(-DRIVE_SPEED, BACKWARD_OFFSET_ANGLE, segment / CM_PER_SECOND)
+            self.drive(-DRIVE_SPEED, offset_angle, segment / cm_per_second)
             self.stop(0.1)
         if remainder > 0:
             offset = 0
             if remainder >= 10 and cm <= segment:
                 offset = DURATION_OFFSET_BASE
-            duration = remainder / CM_PER_SECOND + offset
-            self.drive(-DRIVE_SPEED, BACKWARD_OFFSET_ANGLE, duration)
+            duration = remainder / cm_per_second + offset
+            self.drive(-DRIVE_SPEED, offset_angle, duration)
         self.stop()
             
-    def rotate_left(self, degrees):
+    def rotate_left(self, degrees, rotation_speed=ROTATION_SPEED, step_duration=LEFT_STEP_DURATION):
         steps_needed = degrees / DEGREES_PER_STEP
         full_steps = int(steps_needed)
         remainder = steps_needed - full_steps
         print("[ROT_L] " + str(degrees) + " deg | steps=" + str(full_steps) + " remainder=" + str(round(remainder,3)))
         for i in range(full_steps):
             print("[ROT_L] Step " + str(i+1) + "/" + str(full_steps))
-            self.drive(ROTATION_SPEED, FULL_LOCK, LEFT_STEP_DURATION)
-            self.drive(-ROTATION_SPEED, FULL_LOCK, LEFT_STEP_DURATION)
-            self.stop(0.1)
+            self.drive(rotation_speed, FULL_LOCK, step_duration)
+            self.drive(-rotation_speed, FULL_LOCK, step_duration)
+            self.stop(0.4)
             
-        if remainder > 0.02:
-            partial = LEFT_STEP_DURATION * remainder
+        if remainder > 0:
+            partial = step_duration * remainder
             print("[ROT_L] Partial step: " + str(round(partial,3)) + "s")
-            self.drive(ROTATION_SPEED, FULL_LOCK, partial)
-            self.drive(-ROTATION_SPEED, FULL_LOCK, partial)
+            self.drive(rotation_speed, FULL_LOCK, partial)
+            self.drive(-rotation_speed, FULL_LOCK, partial)
         self.stop()
         print("[ROT_L] Complete")
         
-    def rotate_right(self, degrees):
+    def rotate_right(self, degrees, rotation_speed=ROTATION_SPEED, step_duration=RIGHT_STEP_DURATION):
         steps_needed = degrees / DEGREES_PER_STEP
         full_steps = int(steps_needed)
         remainder = steps_needed - full_steps
         print("[ROT_R] " + str(degrees) + " deg | steps=" + str(full_steps) + " remainder=" + str(round(remainder,3)))
         for i in range(full_steps):
             print("[ROT_R] Step " + str(i+1) + "/" + str(full_steps))
-            self.drive(ROTATION_SPEED, -FULL_LOCK, RIGHT_STEP_DURATION)
-            self.drive(-ROTATION_SPEED, -FULL_LOCK, RIGHT_STEP_DURATION)
-            self.stop(0.1)
+            self.drive(rotation_speed, -FULL_LOCK, step_duration)
+            self.drive(-rotation_speed, -FULL_LOCK, step_duration)
+            self.stop(0.4)
 
-        if remainder > 0.02:
-            partial = RIGHT_STEP_DURATION * remainder
+        if remainder > 0:
+            partial = step_duration * remainder
             print("[ROT_R] Partial step: " + str(round(partial,3)) + "s")
-            self.drive(ROTATION_SPEED, -FULL_LOCK, partial)
-            self.drive(-ROTATION_SPEED, -FULL_LOCK, partial)
+            self.drive(rotation_speed, -FULL_LOCK, partial)
+            self.drive(-rotation_speed, -FULL_LOCK, partial)
         self.stop()
         print("[ROT_R] Complete")
         

@@ -252,6 +252,16 @@ def handle_message(raw, source="unknown"):
     return handle_command(text, source=source)
 
 
+def _parse_tune_values(command, expected_count):
+    parts = command.split("/")
+    if len(parts) != expected_count:
+        raise ValueError("Tune command requires " + str(expected_count) + " values")
+    try:
+        return [float(part) for part in parts]
+    except ValueError:
+        raise ValueError("Tune command values must be numeric")
+
+
 def handle_command(raw, source="unknown"):
     """
     Parse and execute either a raw command like FW010 or a JSON command of
@@ -262,6 +272,10 @@ def handle_command(raw, source="unknown"):
         BWxxx  - move backward xxx cm       e.g. BW010 = backward 10cm
         RLxxx  - rotate left xxx degrees    e.g. RL090 = rotate left 90 deg
         RRxxx  - rotate right xxx degrees   e.g. RR045 = rotate right 45 deg
+        TFW... - tune move forward          e.g. TFW010/190/98 (cm, offset angle, cm/sec)
+        TBW... - tune move backward         e.g. TBW010/-220/98 (cm, offset angle, cm/sec)
+        TRL... - tune rotate left           e.g. TRL090/100/0.455 (degrees, rotation speed, step duration)
+        TRR... - tune rotate right          e.g. TRR090/100/0.4751 (degrees, rotation speed, step duration)
         DRIVE,x,z - continuous manual drive; x and z are -1000 to 1000
         STOP   - stop immediately
 
@@ -307,6 +321,16 @@ def handle_command(raw, source="unknown"):
             car.move_backward(cm)
             status, resp_msg = 200, msg + " OK"
 
+        elif msg.startswith("TFW") and len(msg) >= 4:
+            cm, offset_angle, cm_per_second = _parse_tune_values(msg[3:], 3)
+            car.move_forward(cm, offset_angle=offset_angle, cm_per_second=cm_per_second)
+            status, resp_msg = 200, msg + " OK"
+
+        elif msg.startswith("TBW") and len(msg) >= 4:
+            cm, offset_angle, cm_per_second = _parse_tune_values(msg[3:], 3)
+            car.move_backward(cm, offset_angle=offset_angle, cm_per_second=cm_per_second)
+            status, resp_msg = 200, msg + " OK"
+
         elif msg.startswith("RL") and len(msg) >= 4:
             deg = float(msg[2:])
             car.rotate_left(deg)
@@ -315,6 +339,16 @@ def handle_command(raw, source="unknown"):
         elif msg.startswith("RR") and len(msg) >= 4:
             deg = float(msg[2:])
             car.rotate_right(deg)
+            status, resp_msg = 200, msg + " OK"
+
+        elif msg.startswith("TRL") and len(msg) >= 4:
+            degrees, rotation_speed, step_duration = _parse_tune_values(msg[3:], 3)
+            car.rotate_left(degrees, rotation_speed=rotation_speed, step_duration=step_duration)
+            status, resp_msg = 200, msg + " OK"
+
+        elif msg.startswith("TRR") and len(msg) >= 4:
+            degrees, rotation_speed, step_duration = _parse_tune_values(msg[3:], 3)
+            car.rotate_right(degrees, rotation_speed=rotation_speed, step_duration=step_duration)
             status, resp_msg = 200, msg + " OK"
 
         else:
