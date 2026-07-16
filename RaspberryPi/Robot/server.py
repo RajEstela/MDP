@@ -5,12 +5,14 @@ import time
 import json
 import copy
 import re
+from collections import Counter, deque
 from nanocar import NanoCarLink
 
 # WiFi config
 WIFI_HOST = "0.0.0.0"
 WIFI_PORT = 5000
 ARENA_PORT = 5001
+IMAGE_RESULT_PORT = 5002
 
 # Bluetooth config
 BT_PORT = 1
@@ -24,9 +26,11 @@ car = NanoCarLink()
 arena_lock = threading.Lock()
 arena_clients_lock = threading.Lock()
 bluetooth_clients_lock = threading.Lock()
+image_results_lock = threading.Lock()
 latest_arena = None
 arena_clients = {}
 bluetooth_clients = {}
+image_results = deque(maxlen=2000)
 
 DIRECTIONS = {"N", "E", "S", "W"}
 ADD_RE = re.compile(r"^ADD,([^,]+),\((\d+),(\d+)\)$", re.IGNORECASE)
@@ -132,6 +136,81 @@ def _send_socket_line(conn, lock, payload):
     data = payload if isinstance(payload, str) else json.dumps(payload, separators=(",", ":"))
     with lock:
         conn.sendall((data.rstrip("\r\n") + "\n").encode("utf-8"))
+
+
+def _parse_image_result_line(text):
+    parts = text.strip().split(",")
+    if len(parts) != 3 or parts[0] != "IMGRES":
+        return None
+    try:
+        return parts[1], int(parts[2])
+    except ValueError:
+        return None
+
+
+def record_image_result(obstacle_id, target_id):
+    with image_results_lock:
+        image_results.append((time.monotonic(), str(obstacle_id), int(target_id)))
+
+
+def scan_image_results(scan_seconds):
+    if scan_seconds <= 0:
+        raise ValueError("scan seconds must be positive")
+
+    start_time = time.monotonic()
+    deadline = start_time + scan_seconds
+    time.sleep(scan_seconds)
+
+    with image_results_lock:
+        target_ids = [target_id for timestamp, _, target_id in image_results if start_time <= timestamp <= deadline]
+
+    if not target_ids:
+        return None, 0, 0
+
+    counts = Counter(target_ids)
+    target_id, count = counts.most_common(1)[0]
+    return target_id, count, len(target_ids)
+
+
+def handle_image_result_client(conn, addr):
+    print("[IMG] Connected from " + str(addr))
+    pending = b""
+    try:
+        while True:
+            chunk = conn.recv(4096)
+            if not chunk:
+                break
+            pending += chunk
+            while b"\n" in pending:
+                line, pending = pending.split(b"\n", 1)
+                text = line.decode("utf-8", errors="replace").strip()
+                if not text:
+                    continue
+                parsed = _parse_image_result_line(text)
+                if parsed is None:
+                    continue
+                obstacle_id, target_id = parsed
+                record_image_result(obstacle_id, target_id)
+    except Exception as e:
+        print("[IMG] Client error: " + str(e))
+    finally:
+        conn.close()
+        print("[IMG] Disconnected: " + str(addr))
+
+
+def start_image_result_server():
+    server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    server.bind(("127.0.0.1", IMAGE_RESULT_PORT))
+    server.listen(1)
+    print("[IMG] Listening on 127.0.0.1:" + str(IMAGE_RESULT_PORT))
+    while True:
+        try:
+            conn, addr = server.accept()
+            thread = threading.Thread(target=handle_image_result_client, args=(conn, addr), daemon=True)
+            thread.start()
+        except Exception as e:
+            print("[IMG] Server error: " + str(e))
 
 
 def broadcast_arena(arena):
@@ -272,6 +351,7 @@ def handle_command(raw, source="unknown"):
         BWxxx  - move backward xxx cm       e.g. BW010 = backward 10cm
         RLxxx  - rotate left xxx degrees    e.g. RL090 = rotate left 90 deg
         RRxxx  - rotate right xxx degrees   e.g. RR045 = rotate right 45 deg
+        SCAN,x - scan image results for x seconds and return the majority target
         TFW... - tune move forward          e.g. TFW010/190/98 (cm, offset angle, cm/sec)
         TBW... - tune move backward         e.g. TBW010/-220/98 (cm, offset angle, cm/sec)
         TRL... - tune rotate left           e.g. TRL090/100/0.455 (degrees, rotation speed, step duration)
@@ -283,6 +363,9 @@ def handle_command(raw, source="unknown"):
     Status 200 = success, 400 = bad/unknown command, 500 = execution error.
     """
     req_id = None
+    scan_target_id = None
+    scan_target_count = None
+    scan_sample_count = None
     try:
         raw = raw.strip()
         if raw.startswith("{"):
@@ -351,6 +434,17 @@ def handle_command(raw, source="unknown"):
             car.rotate_right(degrees, rotation_speed=rotation_speed, step_duration=step_duration)
             status, resp_msg = 200, msg + " OK"
 
+        elif msg.startswith("SCAN,"):
+            parts = msg.split(",", 1)
+            if len(parts) != 2:
+                raise ValueError("SCAN requires one duration value")
+            scan_seconds = float(parts[1])
+            scan_target_id, scan_target_count, scan_sample_count = scan_image_results(scan_seconds)
+            if scan_target_id is None:
+                status, resp_msg = 200, "SCAN OK but no detections"
+            else:
+                status, resp_msg = 200, "SCAN OK"
+
         else:
             print("[CMD] Unknown command: " + msg)
             status, resp_msg = 400, "Unknown command: " + msg
@@ -363,7 +457,12 @@ def handle_command(raw, source="unknown"):
         print("[CMD] Execution error for '" + msg + "': " + str(e))
         status, resp_msg = 500, "Execution error: " + str(e)
 
-    return json.dumps({"id": req_id, "status": status, "msg": resp_msg})
+    response = {"id": req_id, "status": status, "msg": resp_msg}
+    if scan_target_id is not None:
+        response["targetId"] = scan_target_id
+        response["targetCount"] = scan_target_count
+        response["sampleCount"] = scan_sample_count
+    return json.dumps(response)
 
 
 # WiFi client handler
@@ -571,6 +670,9 @@ def main():
     arena_thread = threading.Thread(target=start_arena_server, daemon=True)
     arena_thread.start()
 
+    image_thread = threading.Thread(target=start_image_result_server, daemon=True)
+    image_thread.start()
+
     bt_thread = threading.Thread(target=start_bt_server, daemon=True)
     bt_thread.start()
 
@@ -580,6 +682,7 @@ def main():
     print("[MAIN] Bluetooth, movement, and arena servers running")
     print("[MAIN] Movement WiFi port: " + str(WIFI_PORT))
     print("[MAIN] Arena relay port: " + str(ARENA_PORT))
+    print("[MAIN] Image result relay port: " + str(IMAGE_RESULT_PORT))
     print("[MAIN] BT channel: " + str(BT_PORT))
     print("[MAIN] RFCOMM device: " + RFCOMM_DEVICE)
     print("[MAIN] Press Ctrl+C to stop")

@@ -7,6 +7,8 @@ import threading
 import cv2
 
 DEFAULT_PORT = 5005
+RESULT_RELAY_HOST = "127.0.0.1"
+RESULT_RELAY_PORT = 5002
 
 # Confirmed lab image-ID table (see pc_infer_server.py for the source of
 # truth / class_id resolution - this copy is just for friendly console
@@ -85,6 +87,13 @@ def run_snapshot(path: str, brightness: float, exposure: float):
 
 def _listen_for_results(sock):
     reader = sock.makefile("rb")
+    relay = None
+    try:
+        relay = socket.create_connection((RESULT_RELAY_HOST, RESULT_RELAY_PORT), timeout=2.0)
+        print(f"Forwarding detected IDs to {RESULT_RELAY_HOST}:{RESULT_RELAY_PORT}")
+    except OSError:
+        relay = None
+
     while True:
         line = reader.readline()
         if not line:
@@ -106,8 +115,23 @@ def _listen_for_results(sock):
         if target_id is not None:
             description = ID_DESCRIPTIONS.get(target_id, "unknown")
             print(f"[PC] Detected: ID {target_id} ({description})")
+            if relay is not None:
+                try:
+                    relay.sendall((line.decode("utf-8", errors="replace") + "\n").encode("utf-8"))
+                except OSError:
+                    try:
+                        relay.close()
+                    except OSError:
+                        pass
+                    relay = None
         else:
             print(f"[PC] {line.decode('ascii', errors='replace')}")
+
+    if relay is not None:
+        try:
+            relay.close()
+        except OSError:
+            pass
 
 
 def run_stream(host: str, port: int, obstacle_id: str, jpeg_quality: int, resize_width: int,
