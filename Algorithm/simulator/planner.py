@@ -259,8 +259,10 @@ def _hamiltonian_optimal_order(
 def get_top_n_routes(
     obstacles: list[Obstacle],
     n: int = 5,
+    start: RobotState | None = None,
 ) -> list[tuple[list[Command], float]]:
-    start = RobotState(x=START_X_CM, y=START_Y_CM, theta=START_THETA)
+    if start is None:
+        start = RobotState(x=START_X_CM, y=START_Y_CM, theta=START_THETA)
     obs_poses = [(obs, obstacle_approach_pose(obs)) for obs in obstacles]
     poses = [p for _, p in obs_poses]
 
@@ -287,8 +289,9 @@ def get_top_n_routes(
     return routes
 
 
-def get_commands(obstacles: list[Obstacle]) -> list[Command]:
-    start = RobotState(x=START_X_CM, y=START_Y_CM, theta=START_THETA)
+def get_commands(obstacles: list[Obstacle], start: RobotState | None = None) -> list[Command]:
+    if start is None:
+        start = RobotState(x=START_X_CM, y=START_Y_CM, theta=START_THETA)
     obs_poses = [(obs, obstacle_approach_pose(obs)) for obs in obstacles]
     poses = [p for _, p in obs_poses]
     ordered_poses = _hamiltonian_optimal_order(start, poses)

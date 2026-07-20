@@ -3,7 +3,7 @@ import math
 from simulator.arena import cm_to_px
 from simulator.dubins import dubins_lrl, dubins_lsl, dubins_lsr, dubins_optimal, dubins_rlr, dubins_rsl, dubins_rsr
 from simulator.config import START_THETA, START_X_CM, START_Y_CM
-from simulator.planner import OBSTACLES, get_commands, generate_random_obstacles, obstacle_approach_pose, _hamiltonian_optimal_order, _angle_diff, _plan_leg, _path_in_bounds
+from simulator.planner import OBSTACLES, get_commands, get_top_n_routes, generate_random_obstacles, obstacle_approach_pose, _hamiltonian_optimal_order, _angle_diff, _plan_leg, _path_in_bounds
 from simulator.robot import arc_step, move_forward, rotate, step_command
 from simulator.types import Command, DubinsPath, Obstacle, RobotState
 
@@ -514,3 +514,32 @@ def test_no_collision_random_arenas():
                 f"from=({current.x},{current.y}) to=({pose.x},{pose.y})"
             )
             current = pose
+
+
+# ── Task 3: optional start pose parameter ──────────────────────────────────
+
+def test_get_commands_uses_provided_start():
+    custom_start = RobotState(x=100.0, y=100.0, theta=0.0)
+    obs = [Obstacle(x=150, y=100, face='W')]
+    cmds = get_commands(obs, start=custom_start)
+    state = custom_start
+    for cmd in cmds:
+        remaining = cmd.value
+        while remaining > 0.001:
+            state, remaining = step_command(state, cmd, remaining)
+    pose = obstacle_approach_pose(obs[0])
+    assert math.hypot(state.x - pose.x, state.y - pose.y) < 2.0
+
+
+def test_get_commands_without_start_keeps_default_behavior():
+    cmds_default = get_commands(OBSTACLES)
+    cmds_explicit_default = get_commands(OBSTACLES, start=None)
+    assert cmds_default == cmds_explicit_default
+
+
+def test_get_top_n_routes_uses_provided_start():
+    custom_start = RobotState(x=100.0, y=100.0, theta=0.0)
+    obs = [Obstacle(x=150, y=100, face='W')]
+    routes = get_top_n_routes(obs, n=1, start=custom_start)
+    _, length = routes[0]
+    assert abs(length - 30.0) < 0.01
