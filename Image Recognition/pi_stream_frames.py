@@ -88,11 +88,17 @@ def run_snapshot(path: str, brightness: float, exposure: float):
 def _listen_for_results(sock):
     reader = sock.makefile("rb")
     relay = None
-    try:
-        relay = socket.create_connection((RESULT_RELAY_HOST, RESULT_RELAY_PORT), timeout=2.0)
-        print(f"Forwarding detected IDs to {RESULT_RELAY_HOST}:{RESULT_RELAY_PORT}")
-    except OSError:
-        relay = None
+
+    def connect_relay():
+        try:
+            connected = socket.create_connection((RESULT_RELAY_HOST, RESULT_RELAY_PORT), timeout=2.0)
+            print(f"Forwarding detected IDs to {RESULT_RELAY_HOST}:{RESULT_RELAY_PORT}")
+            return connected
+        except OSError as exc:
+            print(f"Could not connect to result relay at {RESULT_RELAY_HOST}:{RESULT_RELAY_PORT}: {exc}")
+            return None
+
+    relay = connect_relay()
 
     while True:
         line = reader.readline()
@@ -115,6 +121,8 @@ def _listen_for_results(sock):
         if target_id is not None:
             description = ID_DESCRIPTIONS.get(target_id, "unknown")
             print(f"[PC] Detected: ID {target_id} ({description})")
+            if relay is None:
+                relay = connect_relay()
             if relay is not None:
                 try:
                     relay.sendall((line.decode("utf-8", errors="replace") + "\n").encode("utf-8"))
