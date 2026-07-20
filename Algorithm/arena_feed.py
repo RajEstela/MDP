@@ -106,3 +106,56 @@ def send_status(sock: socket.socket, revision: int, state: str, message: str, **
         **details,
     }
     sock.sendall((json.dumps(payload, separators=(",", ":")) + "\n").encode("utf-8"))
+
+
+def listen(
+    host: str,
+    on_snapshot: Callable[[dict, socket.socket], None],
+    once: bool = False,
+    on_status: Callable[[str], None] | None = None,
+) -> None:
+    """Connect to the RPi's arena feed and invoke on_snapshot(snapshot, sock)
+    for each new, distinct arena snapshot received. Reconnects on drop.
+
+    on_status, if given, is called with 'connecting' / 'connected' /
+    'reconnecting' as the connection state changes.
+    """
+    def _status(s: str) -> None:
+        if on_status:
+            on_status(s)
+
+    last_snapshot_signature = None
+    while True:
+        _status("connecting")
+        try:
+            print(f"[arena] connecting to {host}:{ARENA_PORT}...")
+            with socket.create_connection((host, ARENA_PORT), timeout=10.0) as sock:
+                sock.settimeout(None)
+                _status("connected")
+                print("[arena] connected; waiting for tablet arena snapshot")
+                with sock.makefile("r", encoding="utf-8", newline="\n") as stream:
+                    for line in stream:
+                        if not line.strip():
+                            continue
+                        snapshot = json.loads(line)
+                        if snapshot.get("type") != "arena":
+                            continue
+                        revision = int(snapshot.get("revision", 0))
+                        signature = json.dumps(snapshot, sort_keys=True, separators=(",", ":"))
+                        if signature == last_snapshot_signature:
+                            continue
+                        last_snapshot_signature = signature
+                        try:
+                            on_snapshot(snapshot, sock)
+                        except Exception as exc:
+                            print("[arena] processing error: " + str(exc))
+                            send_status(sock, revision, "error", str(exc))
+                        if once:
+                            return
+        except (ConnectionError, OSError, json.JSONDecodeError) as exc:
+            print("[arena] connection lost: " + str(exc))
+            _status("reconnecting")
+
+        if once:
+            return
+        time.sleep(RECONNECT_DELAY_S)

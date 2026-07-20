@@ -114,3 +114,109 @@ def test_send_status_writes_newline_terminated_json():
         "message": "Route calculated",
         "commandCount": 7,
     }
+
+
+# ── listen ────────────────────────────────────────────────────────────────
+
+import socket as socket_module
+import threading
+import time
+
+from arena_feed import listen
+
+
+def _free_port() -> int:
+    s = socket_module.socket(socket_module.AF_INET, socket_module.SOCK_STREAM)
+    s.bind(('127.0.0.1', 0))
+    port = s.getsockname()[1]
+    s.close()
+    return port
+
+
+def test_listen_invokes_callback_for_one_snapshot(monkeypatch):
+    port = _free_port()
+    monkeypatch.setattr('arena_feed.ARENA_PORT', port)
+
+    server = socket_module.socket(socket_module.AF_INET, socket_module.SOCK_STREAM)
+    server.setsockopt(socket_module.SOL_SOCKET, socket_module.SO_REUSEADDR, 1)
+    server.bind(('127.0.0.1', port))
+    server.listen(1)
+
+    line = json.dumps(_snapshot()) + "\n"
+
+    def run_server():
+        conn, _ = server.accept()
+        conn.sendall(line.encode())
+        time.sleep(0.2)
+        conn.close()
+        server.close()
+
+    threading.Thread(target=run_server, daemon=True).start()
+
+    received = []
+    listen('127.0.0.1', lambda snap, sock: received.append(snap), once=True)
+
+    assert len(received) == 1
+    assert received[0]["revision"] == 1
+
+
+def test_listen_dedupes_identical_consecutive_snapshots(monkeypatch):
+    port = _free_port()
+    monkeypatch.setattr('arena_feed.ARENA_PORT', port)
+
+    server = socket_module.socket(socket_module.AF_INET, socket_module.SOCK_STREAM)
+    server.setsockopt(socket_module.SOL_SOCKET, socket_module.SO_REUSEADDR, 1)
+    server.bind(('127.0.0.1', port))
+    server.listen(1)
+
+    snap1 = json.dumps(_snapshot()) + "\n"
+    snap2 = json.dumps(_snapshot(revision=2)) + "\n"
+
+    def run_server():
+        conn, _ = server.accept()
+        conn.sendall(snap1.encode())
+        conn.sendall(snap1.encode())  # duplicate, should be skipped
+        conn.sendall(snap2.encode())
+        time.sleep(0.3)
+        conn.close()
+        server.close()
+
+    threading.Thread(target=run_server, daemon=True).start()
+
+    received = []
+    t = threading.Thread(
+        target=listen,
+        args=('127.0.0.1', lambda snap, sock: received.append(snap)),
+        kwargs={"once": False},
+        daemon=True,
+    )
+    t.start()
+    time.sleep(0.6)
+
+    assert [s["revision"] for s in received] == [1, 2]
+
+
+def test_listen_reports_status_transitions(monkeypatch):
+    port = _free_port()
+    monkeypatch.setattr('arena_feed.ARENA_PORT', port)
+
+    server = socket_module.socket(socket_module.AF_INET, socket_module.SOCK_STREAM)
+    server.setsockopt(socket_module.SOL_SOCKET, socket_module.SO_REUSEADDR, 1)
+    server.bind(('127.0.0.1', port))
+    server.listen(1)
+
+    line = json.dumps(_snapshot()) + "\n"
+
+    def run_server():
+        conn, _ = server.accept()
+        conn.sendall(line.encode())
+        time.sleep(0.2)
+        conn.close()
+        server.close()
+
+    threading.Thread(target=run_server, daemon=True).start()
+
+    statuses = []
+    listen('127.0.0.1', lambda snap, sock: None, once=True, on_status=statuses.append)
+
+    assert statuses == ["connecting", "connected"]
