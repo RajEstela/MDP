@@ -47,6 +47,8 @@ def test_process_snapshot_sends_obstacle_reached_status_when_executing(monkeypat
     commands = [Command("FW", 10.0), Command("WAIT", 300.0, obstacle_id="B1")]
     monkeypatch.setattr(live_arena, "get_commands", lambda obstacles, start=None: commands)
 
+    sent_scan_commands = []
+
     class _FakeCarConnection:
         def __init__(self, host=None):
             pass
@@ -56,6 +58,9 @@ def test_process_snapshot_sends_obstacle_reached_status_when_executing(monkeypat
 
         def __exit__(self, *args):
             pass
+
+        def send_command(self, cmd):
+            sent_scan_commands.append(cmd)
 
         def send_commands(self, cmds, on_progress=None, on_obstacle_reached=None):
             for cmd in cmds:
@@ -76,3 +81,7 @@ def test_process_snapshot_sends_obstacle_reached_status_when_executing(monkeypat
     sent_payloads = [call.args[0] for call in sock.sendall.call_args_list]
     states = [c.decode() for c in sent_payloads]
     assert any('"state":"obstacle_reached"' in s and '"obstacleId":"B1"' in s for s in states)
+
+    assert len(sent_scan_commands) == 1
+    assert sent_scan_commands[0].kind == "SCAN"
+    assert sent_scan_commands[0].obstacle_id == "B1"

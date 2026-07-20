@@ -18,9 +18,9 @@ class Obstacle:
 
 @dataclass
 class Command:
-    kind: str    # 'FW' | 'BW' | 'RL' | 'RR' | 'WAIT'
-    value: float # cm for FW/BW; degrees for RL/RR; frames for WAIT
-    obstacle_id: str | None = None  # set on the WAIT after a leg: which obstacle was just reached
+    kind: str    # 'FW' | 'BW' | 'RL' | 'RR' | 'WAIT' | 'SCAN'
+    value: float # cm for FW/BW; degrees for RL/RR; frames for WAIT; seconds for SCAN
+    obstacle_id: str | None = None  # set on WAIT (which obstacle was just reached) and required on SCAN
 
 
 @dataclass

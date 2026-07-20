@@ -35,6 +35,7 @@ DEFAULTS: dict = {
         'start_y_cm': 40.0,
         'start_theta': 90.0,
         'wall_margin_cm': 10.0,
+        'scan_seconds': 5.0,
     },
     'default_obstacles': [
         {'x': 50,  'y': 100, 'face': 'N'},
@@ -136,5 +137,6 @@ START_X_CM = _cfg['simulator']['start_x_cm']
 START_Y_CM = _cfg['simulator']['start_y_cm']
 START_THETA = _cfg['simulator']['start_theta']
 WALL_MARGIN_CM = _cfg['simulator']['wall_margin_cm']
+SCAN_SECONDS = _cfg['simulator']['scan_seconds']
 
 DEFAULT_OBSTACLES = [Obstacle(x=o['x'], y=o['y'], face=o['face']) for o in _cfg['default_obstacles']]

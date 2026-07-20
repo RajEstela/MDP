@@ -12,7 +12,9 @@ import argparse
 
 from arena_feed import arena_to_obstacles, arena_to_robot_start, listen, send_status
 from comms import CarConnection, RPI_HOST, serialize
+from simulator.config import SCAN_SECONDS
 from simulator.planner import get_commands
+from simulator.types import Command
 
 
 def process_snapshot(sock, snapshot: dict, host: str, execute: bool) -> None:
@@ -43,11 +45,12 @@ def process_snapshot(sock, snapshot: dict, host: str, execute: bool) -> None:
         print("[route] calculation complete; --execute was not supplied")
         return
 
-    def on_obstacle_reached(obstacle_id: str) -> None:
-        send_status(sock, revision, "obstacle_reached", f"Reached obstacle {obstacle_id}", obstacleId=obstacle_id)
-
     send_status(sock, revision, "running", "Sending route to nanocar")
     with CarConnection(host=host) as car:
+        def on_obstacle_reached(obstacle_id: str) -> None:
+            car.send_command(Command('SCAN', SCAN_SECONDS, obstacle_id=obstacle_id))
+            send_status(sock, revision, "obstacle_reached", f"Reached obstacle {obstacle_id}", obstacleId=obstacle_id)
+
         car.send_commands(commands, on_obstacle_reached=on_obstacle_reached)
     send_status(sock, revision, "completed", "Route completed")
 

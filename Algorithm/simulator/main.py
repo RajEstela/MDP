@@ -10,10 +10,10 @@ import arena_feed
 from app_config import RPI_HOST
 from comms import CarConnection
 from simulator.arena import draw_arena, draw_obstacles, draw_path, trace_path_points
-from simulator.config import ARENA_PX, FPS, START_THETA, START_X_CM, START_Y_CM
+from simulator.config import ARENA_PX, FPS, SCAN_SECONDS, START_THETA, START_X_CM, START_Y_CM
 from simulator.planner import generate_random_obstacles, get_top_n_routes
 from simulator.robot import draw_robot, step_command
-from simulator.types import Obstacle, RobotState
+from simulator.types import Command, Obstacle, RobotState
 
 # ── phase durations ──────────────────────────────────────────────────────────
 _SHOW_ALL_FRAMES  = int(4 * FPS)
@@ -175,17 +175,18 @@ def _run_car_executor(commands: list, host: str, sock, revision: int, live_state
             live_state.exec_progress["index"] = sent
             live_state.exec_progress["last_wire"] = wire
 
-    def on_obstacle_reached(obstacle_id: str) -> None:
-        with live_state.sock_lock:
-            arena_feed.send_status(
-                sock, revision, "obstacle_reached", f"Reached obstacle {obstacle_id}",
-                obstacleId=obstacle_id,
-            )
-
     with live_state.sock_lock:
         arena_feed.send_status(sock, revision, "running", "Sending route to nanocar")
     try:
         with CarConnection(host=host) as car:
+            def on_obstacle_reached(obstacle_id: str) -> None:
+                car.send_command(Command('SCAN', SCAN_SECONDS, obstacle_id=obstacle_id))
+                with live_state.sock_lock:
+                    arena_feed.send_status(
+                        sock, revision, "obstacle_reached", f"Reached obstacle {obstacle_id}",
+                        obstacleId=obstacle_id,
+                    )
+
             car.send_commands(commands, on_progress=on_progress, on_obstacle_reached=on_obstacle_reached)
     except Exception as exc:
         with live_state.lock:

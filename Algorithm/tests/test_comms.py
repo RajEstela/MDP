@@ -1,5 +1,7 @@
 import json
 
+import pytest
+
 from comms import CarConnection, serialize
 from simulator.types import Command
 
@@ -37,6 +39,15 @@ def test_serialize_wait_returns_none():
     assert serialize(Command("WAIT", 300.0)) is None
 
 
+def test_serialize_formats_scan_command():
+    assert serialize(Command("SCAN", 5.0, obstacle_id="B1")) == "SCAN,5,B1"
+
+
+def test_serialize_scan_without_obstacle_id_raises():
+    with pytest.raises(ValueError):
+        serialize(Command("SCAN", 5.0))
+
+
 def test_send_commands_calls_on_progress_for_movement_commands_only():
     conn = _make_connection(n_responses=2)
     calls = []
@@ -72,3 +83,10 @@ def test_send_commands_wait_never_sent_to_car():
     conn = _make_connection(n_responses=1)
     conn.send_commands([Command("WAIT", 300.0, obstacle_id="B1"), Command("FW", 10.0)])
     assert len(conn._sock.sent) == 1  # only the FW, WAIT is simulator-only
+
+
+def test_send_command_sends_scan_wire_format():
+    conn = _make_connection(n_responses=1)
+    conn.send_command(Command("SCAN", 5.0, obstacle_id="B1"))
+    payload = json.loads(conn._sock.sent[0].decode())
+    assert payload["cmd"] == "SCAN,5,B1"

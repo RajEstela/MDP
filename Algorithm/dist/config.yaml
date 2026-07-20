@@ -24,6 +24,7 @@ simulator:
   start_y_cm: 40.0
   start_theta: 90.0
   wall_margin_cm: 10.0   # keep this far from the outer walls when planning (ground ruler at the perimeter)
+  scan_seconds: 5.0      # how long the RPi samples camera detections for on each SCAN command
 
 default_obstacles:
   - {x: 50,  y: 100, face: N}

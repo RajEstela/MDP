@@ -9,10 +9,11 @@ Wire protocol (matches RaspberryPi/Robot/server.py):
   Response — JSON:       {"id": <int>, "status": 200, "msg": "<KIND><value> OK"}
 
 Command examples:
-  FW050  — move forward 50 cm
-  BW020  — move backward 20 cm
-  RL090  — rotate left 90 degrees
-  RR038  — rotate right 38 degrees
+  FW050        — move forward 50 cm
+  BW020        — move backward 20 cm
+  RL090        — rotate left 90 degrees
+  RR038        — rotate right 38 degrees
+  SCAN,5,B1    — scan camera detections for 5 seconds and report obstacle B1's target
 WAIT commands are simulator-only and are silently skipped.
 """
 import json
@@ -24,9 +25,13 @@ from app_config import RPI_HOST, RPI_PORT, RPI_TIMEOUT_S as _TIMEOUT_S
 
 
 def serialize(cmd: Command) -> str | None:
-    """Return the bare command string (e.g. 'FW050'), or None for WAIT."""
+    """Return the bare command string (e.g. 'FW050' or 'SCAN,5,B1'), or None for WAIT."""
     if cmd.kind == 'WAIT':
         return None
+    if cmd.kind == 'SCAN':
+        if not cmd.obstacle_id:
+            raise ValueError("SCAN command requires an obstacle_id")
+        return f"SCAN,{round(cmd.value)},{cmd.obstacle_id}"
     return f"{cmd.kind}{round(cmd.value):03d}"
 
 

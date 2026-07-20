@@ -10,6 +10,7 @@ from app_config import (
     MIN_APPROACH_CM,
     ROBOT_H_CM,
     ROBOT_W_CM,
+    SCAN_SECONDS,
     START_THETA,
     START_X_CM,
     START_Y_CM,
