@@ -497,6 +497,22 @@ def test_path_in_bounds_handles_rl_rr():
     assert _path_in_bounds(state, cmds) is True
 
 
+def test_path_in_bounds_rejects_path_inside_wall_margin():
+    """A ground ruler runs along the arena perimeter — paths must stay
+    WALL_MARGIN_CM clear of every wall, not just inside the raw 0..200 arena."""
+    from simulator.config import WALL_MARGIN_CM
+    state = RobotState(x=WALL_MARGIN_CM + 5, y=100, theta=180)  # facing West
+    cmds = [Command(kind='FW', value=10)]  # would land 5cm inside the margin
+    assert _path_in_bounds(state, cmds) is False
+
+
+def test_path_in_bounds_accepts_path_at_wall_margin_boundary():
+    from simulator.config import WALL_MARGIN_CM
+    state = RobotState(x=WALL_MARGIN_CM + 5, y=100, theta=180)  # facing West
+    cmds = [Command(kind='FW', value=5)]  # lands exactly on the margin boundary
+    assert _path_in_bounds(state, cmds) is True
+
+
 def test_no_collision_random_arenas():
     """50 random arenas: every planned leg must clear ALL obstacles (including target)."""
     from simulator.config import START_X_CM, START_Y_CM, START_THETA

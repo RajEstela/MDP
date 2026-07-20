@@ -13,6 +13,7 @@ from app_config import (
     START_Y_CM,
     STEP_CM_PER_FRAME,
     TURN_RADIUS_CM,
+    WALL_MARGIN_CM,
 )
 
 ARENA_CM = GRID_SIZE * CELL_CM  # 200 — full arena side length in cm

@@ -3,7 +3,7 @@ import math
 import random as _random
 
 from app_config import DEFAULT_OBSTACLES
-from simulator.config import APPROACH_CM, ARENA_CM, CELL_CM, FPS, GRID_SIZE, START_THETA, START_X_CM, START_Y_CM
+from simulator.config import APPROACH_CM, ARENA_CM, CELL_CM, FPS, GRID_SIZE, START_THETA, START_X_CM, START_Y_CM, WALL_MARGIN_CM
 from simulator.types import Command, Obstacle, RobotState
 
 OBSTACLES: list[Obstacle] = DEFAULT_OBSTACLES
@@ -97,7 +97,9 @@ def _path_in_bounds(
     cmds: list[Command],
     obstacles: list[Obstacle] | None = None,
 ) -> bool:
-    """Sample FW/BW at 2 cm intervals; RL/RR update heading only. True iff path stays in arena and clear of obstacles."""
+    """Sample FW/BW at 2 cm intervals; RL/RR update heading only. True iff path
+    stays WALL_MARGIN_CM clear of every arena wall (a ground ruler runs along
+    the perimeter that a too-close turn could catch) and clear of obstacles."""
     x, y, theta = q1.x, q1.y, q1.theta
     step = 2.0
     obs_list = obstacles or []
@@ -118,7 +120,8 @@ def _path_in_bounds(
                 x -= advance * math.cos(rad)
                 y -= advance * math.sin(rad)
             remaining -= advance
-            if not (0 <= x <= ARENA_CM and 0 <= y <= ARENA_CM):
+            if not (WALL_MARGIN_CM <= x <= ARENA_CM - WALL_MARGIN_CM
+                    and WALL_MARGIN_CM <= y <= ARENA_CM - WALL_MARGIN_CM):
                 return False
             if obs_list and _point_hits_obstacle(x, y, obs_list):
                 return False
@@ -200,10 +203,10 @@ def _plan_leg(
     candidate_ys: set[float] = {q1.y, q2.y}
     for obs in obs_list:
         for cx in (obs.x - 2 * CELL_CM, obs.x + 3 * CELL_CM):
-            if 0.0 <= cx <= ARENA_CM:
+            if WALL_MARGIN_CM <= cx <= ARENA_CM - WALL_MARGIN_CM:
                 candidate_xs.add(cx)
         for cy in (obs.y - 2 * CELL_CM, obs.y + 3 * CELL_CM):
-            if 0.0 <= cy <= ARENA_CM:
+            if WALL_MARGIN_CM <= cy <= ARENA_CM - WALL_MARGIN_CM:
                 candidate_ys.add(cy)
 
     best_cmds: list[Command] = cmds_h  # last-resort fallback
