@@ -547,6 +547,48 @@ def test_best_leg_to_obstacle_picks_larger_distance_when_shortest_is_blocked():
     assert _path_in_bounds(current, leg_cmds, [blocker])
 
 
+# ── Wall margin covers the car's full body, not just its tracked point ─────
+
+def test_footprint_extent_matches_body_size_facing_north():
+    from simulator.planner import _footprint_extent
+    from simulator.config import ROBOT_W_CM
+    # Apex is front-center; facing North the body trails ROBOT_W_CM behind
+    # (south of) the apex and extends ROBOT_W_CM/2 to each side.
+    min_x, max_x, min_y, max_y = _footprint_extent(25.0, 40.0, 90.0)
+    assert abs(min_x - (25.0 - ROBOT_W_CM / 2)) < 0.01
+    assert abs(max_x - (25.0 + ROBOT_W_CM / 2)) < 0.01
+    assert abs(min_y - (40.0 - ROBOT_W_CM)) < 0.01
+    assert abs(max_y - 40.0) < 0.01
+
+
+def test_wall_margin_rejects_body_clip_even_when_apex_has_clearance():
+    """The apex alone can sit WALL_MARGIN_CM clear of a wall while the car's
+    trailing body still clips it — the margin must account for the whole
+    30x30cm footprint, not just the tracked apex point."""
+    from simulator.config import WALL_MARGIN_CM
+    # Facing East, apex at x=15 has 5cm clearance from the west wall itself,
+    # but the body trails 30cm behind (west of) the apex: min_x = 15-30 = -15,
+    # deep inside the wall margin (and off the grid entirely).
+    apex_x = WALL_MARGIN_CM + 5
+    state = RobotState(x=apex_x, y=100, theta=0)  # facing East
+    assert apex_x > WALL_MARGIN_CM  # the apex point itself looks "clear"
+    assert _path_in_bounds(state, []) is False
+
+
+def test_grid_leg_reverse_h_uses_bw_facing_away():
+    """reverse_h drives the horizontal segment with BW while facing the
+    opposite direction of travel, not FW facing toward it."""
+    from simulator.planner import _grid_leg
+    q1 = RobotState(x=100, y=100, theta=90)
+    q2 = RobotState(x=150, y=100, theta=90)  # straight east, same start/end heading
+    cmds, dist = _grid_leg(q1, q2, horizontal_first=True, reverse_h=True)
+    assert abs(dist - 50) < 0.01
+    move_cmds = [c for c in cmds if c.kind in ('FW', 'BW')]
+    assert len(move_cmds) == 1
+    assert move_cmds[0].kind == 'BW'
+    assert abs(move_cmds[0].value - 50) < 0.01
+
+
 def test_no_collision_random_arenas():
     """50 random arenas: every planned leg must clear ALL obstacles (including target)."""
     from simulator.config import START_X_CM, START_Y_CM, START_THETA
