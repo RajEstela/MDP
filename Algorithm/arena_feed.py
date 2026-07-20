@@ -113,12 +113,20 @@ def listen(
     on_snapshot: Callable[[dict, socket.socket], None],
     once: bool = False,
     on_status: Callable[[str], None] | None = None,
+    write_lock: "threading.Lock | None" = None,
 ) -> None:
     """Connect to the RPi's arena feed and invoke on_snapshot(snapshot, sock)
     for each new, distinct arena snapshot received. Reconnects on drop.
 
     on_status, if given, is called with 'connecting' / 'connected' /
     'reconnecting' as the connection state changes.
+
+    write_lock, if given, is a threading.Lock acquired around this
+    function's own error-path send_status() write, to serialize it against
+    other threads writing to the same socket (e.g. simulator/main.py's live
+    mode). When omitted (the default), the write happens unlocked exactly
+    as before — used by callers such as live_arena.py that have no shared
+    lock to synchronize with.
     """
     def _status(s: str) -> None:
         if on_status:
@@ -149,7 +157,11 @@ def listen(
                             on_snapshot(snapshot, sock)
                         except Exception as exc:
                             print("[arena] processing error: " + str(exc))
-                            send_status(sock, revision, "error", str(exc))
+                            if write_lock is not None:
+                                with write_lock:
+                                    send_status(sock, revision, "error", str(exc))
+                            else:
+                                send_status(sock, revision, "error", str(exc))
                         if once:
                             return
         except (ConnectionError, OSError, json.JSONDecodeError) as exc:

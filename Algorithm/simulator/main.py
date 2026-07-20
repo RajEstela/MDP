@@ -286,7 +286,7 @@ def _run_live(host: str, execute: bool, max_frames: int | None = None) -> None:
     listener = threading.Thread(
         target=arena_feed.listen,
         args=(host, lambda snap, sock: _on_snapshot(snap, sock, out_queue, live_state)),
-        kwargs={"on_status": live_state.set_status},
+        kwargs={"on_status": live_state.set_status, "write_lock": live_state.sock_lock},
         daemon=True,
     )
     listener.start()
@@ -323,6 +323,8 @@ def _run_live(host: str, execute: bool, max_frames: int | None = None) -> None:
         current_revision = revision
         executor_started = False
         phase = 'animate'
+        with live_state.lock:
+            live_state.exec_progress = None
 
     frame = 0
     running = True
