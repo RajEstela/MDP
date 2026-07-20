@@ -133,6 +133,14 @@ def _free_port() -> int:
     return port
 
 
+# Sockets deliberately kept open (never closed) so that a leaked background
+# `listen()` thread parks in a blocking read forever instead of hitting EOF
+# and spinning on the reconnect loop. Holding a reference here prevents
+# garbage collection from closing them out from under the parked thread.
+# See test_listen_dedupes_identical_consecutive_snapshots.
+_KEEPALIVE_SOCKETS: list = []
+
+
 def test_listen_invokes_callback_for_one_snapshot(monkeypatch):
     port = _free_port()
     monkeypatch.setattr('arena_feed.ARENA_PORT', port)
@@ -177,9 +185,20 @@ def test_listen_dedupes_identical_consecutive_snapshots(monkeypatch):
         conn.sendall(snap1.encode())
         conn.sendall(snap1.encode())  # duplicate, should be skipped
         conn.sendall(snap2.encode())
-        time.sleep(0.3)
-        conn.close()
-        server.close()
+        # Deliberately do NOT close the connection or the listening socket.
+        # `listen()` runs with once=False in a daemon thread below; if the
+        # server closed its end here, the client would hit EOF, fall into
+        # the reconnect branch, sleep RECONNECT_DELAY_S, and then spin
+        # `socket.create_connection` against this port forever for the rest
+        # of the pytest session (see review finding: leaked never-
+        # terminating background thread). By keeping the connection open,
+        # the client's `for line in stream` loop instead blocks forever on
+        # a plain `recv()` after processing the last snapshot: no more
+        # connect attempts, no more prints, no interference with a later
+        # test's ephemeral port. Stash references so GC doesn't close them
+        # out from under the parked thread.
+        _KEEPALIVE_SOCKETS.append(conn)
+        _KEEPALIVE_SOCKETS.append(server)
 
     threading.Thread(target=run_server, daemon=True).start()
 
@@ -220,3 +239,44 @@ def test_listen_reports_status_transitions(monkeypatch):
     listen('127.0.0.1', lambda snap, sock: None, once=True, on_status=statuses.append)
 
     assert statuses == ["connecting", "connected"]
+
+
+def test_listen_reports_error_status_when_callback_raises(monkeypatch):
+    port = _free_port()
+    monkeypatch.setattr('arena_feed.ARENA_PORT', port)
+
+    server = socket_module.socket(socket_module.AF_INET, socket_module.SOCK_STREAM)
+    server.setsockopt(socket_module.SOL_SOCKET, socket_module.SO_REUSEADDR, 1)
+    server.bind(('127.0.0.1', port))
+    server.listen(1)
+
+    line = json.dumps(_snapshot()) + "\n"
+    received = {}
+
+    def run_server():
+        conn, _ = server.accept()
+        conn.sendall(line.encode())
+        with conn.makefile("r", encoding="utf-8", newline="\n") as stream:
+            reply = stream.readline()
+        received["payload"] = json.loads(reply)
+        conn.close()
+        server.close()
+
+    server_thread = threading.Thread(target=run_server, daemon=True)
+    server_thread.start()
+
+    def raising_callback(snap, sock):
+        raise ValueError("boom")
+
+    # once=True: listen() returns after handling the single snapshot
+    # (including the caught callback exception), so this runs on the main
+    # test thread with no background thread of its own to leak.
+    listen('127.0.0.1', raising_callback, once=True)
+
+    server_thread.join(timeout=2.0)
+    assert not server_thread.is_alive()
+
+    payload = received["payload"]
+    assert payload["type"] == "algorithm_status"
+    assert payload["state"] == "error"
+    assert "boom" in payload["message"]
