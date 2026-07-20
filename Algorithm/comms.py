@@ -67,7 +67,7 @@ class CarConnection:
         self._seq += 1
         payload = json.dumps({"id": self._seq, "cmd": wire}) + "\n"
         self._sock.sendall(payload.encode())
-        print(f"[comms] → {wire}", end='  ', flush=True)
+        print(f"[comms] -> {wire}", end='  ', flush=True)
 
         # RPi sends a JSON response without a trailing newline; use recv() directly.
         raw = self._sock.recv(4096).decode().strip()
@@ -77,7 +77,7 @@ class CarConnection:
             raise RuntimeError(f"Bad response from RPi: {raw!r}") from exc
 
         status = resp.get("status")
-        print(f"← {status} {resp.get('msg', '')}")
+        print(f"<- {status} {resp.get('msg', '')}")
         if status != 200:
             raise RuntimeError(f"RPi error {status}: {resp.get('msg')}")
 
