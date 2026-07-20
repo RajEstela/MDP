@@ -10,7 +10,7 @@ import cv2
 import numpy as np
 from ultralytics import YOLO
 
-MODEL_PATH = "best.pt"
+MODEL_PATH = "best_v4.pt"
 
 # Confirmed lab image-ID table: 1-9, 10='zero', 11='V'...15='Z', bullseye=100.
 # The model's training classes are already named with these exact IDs as
