@@ -23,7 +23,7 @@ def test_process_snapshot_passes_robot_start_to_get_commands(monkeypatch):
     sock = Mock()
     live_arena.process_snapshot(sock, snapshot, host="1.2.3.4", execute=False)
 
-    assert captured["start"] == RobotState(x=15.0, y=30.0, theta=90.0)
+    assert captured["start"] == RobotState(x=25.0, y=40.0, theta=90.0)
 
 
 def test_process_snapshot_sends_route_ready_status_without_execute(monkeypatch):

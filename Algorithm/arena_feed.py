@@ -65,10 +65,12 @@ def arena_to_robot_start(snapshot: dict) -> RobotState:
     """Validate an Android arena snapshot's robot field and convert it to
     the apex pose the simulator tracks.
 
-    robot.x/y are 0-indexed grid cells identifying the center cell of the
-    robot's 3x3-cell (30x30cm) footprint. The apex (front-center point) is
-    the footprint center offset by half the robot width along the facing
-    direction.
+    robot.x/y are 0-indexed grid cells identifying the bottom-left cell of
+    the robot's 3x3-cell (30x30cm) footprint — i.e. the arena position of
+    the robot's bottom-left wheel edge, per live-hardware calibration (the
+    car sat too tight against the wall when that corner was treated as
+    (0,0)). The apex (front-center point) is the footprint center offset by
+    half the robot width along the facing direction.
     """
     grid = snapshot.get("grid") or {}
     columns = int(grid.get("columns", 0))
@@ -88,8 +90,10 @@ def arena_to_robot_start(snapshot: dict) -> RobotState:
     if not (0 <= x < columns and 0 <= y < rows):
         raise ValueError(f"robot position ({x},{y}) is outside the arena")
 
-    center_x = x * cell_cm + cell_cm / 2
-    center_y = y * cell_cm + cell_cm / 2
+    corner_x = x * cell_cm
+    corner_y = y * cell_cm
+    center_x = corner_x + _ROBOT_HALF_WIDTH_CM
+    center_y = corner_y + _ROBOT_HALF_WIDTH_CM
     theta = _DIRECTION_THETA[direction]
     offset_x, offset_y = _DIRECTION_OFFSET[direction]
     apex_x = center_x + offset_x

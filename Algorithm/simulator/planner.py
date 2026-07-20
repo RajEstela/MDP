@@ -41,7 +41,7 @@ def generate_random_obstacles(n: int = 5, seed: int | None = None) -> list[Obsta
     pool: list[tuple[int, int, list[str]]] = []
     for col in range(GRID_SIZE):
         for row in range(GRID_SIZE):
-            if col < 4 and row < 5:        # exclude start zone + one row clearance buffer
+            if col < 5 and row < 6:        # exclude start zone + one row clearance buffer
                 continue
             faces = _valid_faces(col, row)
             if faces:

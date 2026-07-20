@@ -64,22 +64,22 @@ def test_arena_to_obstacles_rejects_invalid_direction():
 
 def test_arena_to_robot_start_north():
     start = arena_to_robot_start(_snapshot(robot={"x": 1, "y": 1, "direction": "N"}))
-    assert start == RobotState(x=15.0, y=30.0, theta=90.0)
+    assert start == RobotState(x=25.0, y=40.0, theta=90.0)
 
 
 def test_arena_to_robot_start_east():
     start = arena_to_robot_start(_snapshot(robot={"x": 1, "y": 1, "direction": "E"}))
-    assert start == RobotState(x=30.0, y=15.0, theta=0.0)
+    assert start == RobotState(x=40.0, y=25.0, theta=0.0)
 
 
 def test_arena_to_robot_start_south():
     start = arena_to_robot_start(_snapshot(robot={"x": 1, "y": 1, "direction": "S"}))
-    assert start == RobotState(x=15.0, y=0.0, theta=270.0)
+    assert start == RobotState(x=25.0, y=10.0, theta=270.0)
 
 
 def test_arena_to_robot_start_west():
     start = arena_to_robot_start(_snapshot(robot={"x": 1, "y": 1, "direction": "W"}))
-    assert start == RobotState(x=0.0, y=15.0, theta=180.0)
+    assert start == RobotState(x=10.0, y=25.0, theta=180.0)
 
 
 def test_arena_to_robot_start_rejects_invalid_direction():
