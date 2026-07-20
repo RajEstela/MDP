@@ -1,8 +1,5 @@
 import argparse
 import base64
-import json
-import select
-import time
 import socket
 import sys
 
@@ -10,7 +7,7 @@ import cv2
 import numpy as np
 from ultralytics import YOLO
 
-MODEL_PATH = "best.pt"
+MODEL_PATH = "best_v4.pt"
 
 # Confirmed lab image-ID table: 1-9, 10='zero', 11='V'...15='Z', bullseye=100.
 # The model's training classes are already named with these exact IDs as
@@ -18,9 +15,6 @@ MODEL_PATH = "best.pt"
 # so index != ID. Always resolve through model.names, never compare raw
 # class_id to an ID directly.
 BULLSEYE_ID = 100
-CAR_PORT = 5000
-DEFAULT_SCAN_DEGREES = 30
-SCAN_DIRECTIONS = ("RR", "RL", "RL")
 
 ID_DESCRIPTIONS = {
     1: "Up arrow", 2: "down arrow", 3: "right arrow", 4: "left arrow",
@@ -36,18 +30,6 @@ def resolve_target_id(model, class_id: int) -> int:
         return int(name)
     except (TypeError, ValueError):
         return -1
-
-
-def send_car_command(host: str, port: int, command: str) -> None:
-    """Send one movement command to the Raspberry Pi and verify its reply."""
-    payload = json.dumps({"id": "bullseye-scan", "cmd": command}) + "\n"
-    with socket.create_connection((host, port), timeout=10.0) as car:
-        car.sendall(payload.encode("utf-8"))
-        raw = car.recv(4096).decode("utf-8").strip()
-
-    response = json.loads(raw)
-    if response.get("status") != 200:
-        raise RuntimeError(response.get("msg", "car rejected the command"))
 
 
 def run_standalone(conf: float):
@@ -75,7 +57,7 @@ def run_standalone(conf: float):
     cv2.destroyAllWindows()
 
 
-def run_serve(port: int, conf: float, car_port: int, scan_degrees: int):
+def run_serve(port: int, conf: float):
     model = YOLO(MODEL_PATH)
 
     server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -87,7 +69,6 @@ def run_serve(port: int, conf: float, car_port: int, scan_degrees: int):
     conn, addr = server.accept()
     print(f"RPi connected from {addr}")
     reader = conn.makefile("rb")
-    scan_step = 0
 
     print("Streaming live. Press 'q' in the video window to quit.")
     try:
@@ -96,17 +77,6 @@ def run_serve(port: int, conf: float, car_port: int, scan_degrees: int):
             if not line:
                 print("RPi disconnected.")
                 break
-
-            # The RPi streams continuously and never waits for our reply, so
-            # frames pile up in the socket buffer while we're busy (e.g.
-            # blocked in send_car_command). Drain to the newest one so we
-            # don't spend the next several iterations processing a stale
-            # backlog instead of the live view.
-            while select.select([conn], [], [], 0)[0]:
-                newer = reader.readline()
-                if not newer:
-                    break
-                line = newer
 
             line = line.strip()
             if not line:
@@ -150,27 +120,7 @@ def run_serve(port: int, conf: float, car_port: int, scan_degrees: int):
                 description = ID_DESCRIPTIONS.get(target_id, "unknown")
                 print(f"Detected: ID {target_id} ({description})  [{best_conf * 100:.0f}% confidence]")
                 reply = f"IMGRES,{obstacle_id},{target_id}\n".encode("ascii")
-                
                 conn.sendall(reply)
-
-                if target_id == BULLSEYE_ID:
-                    direction = SCAN_DIRECTIONS[scan_step]
-                    command = f"RR085"
-                    print(f"Bullseye scan: sending {command} to the car...")
-                    try:
-                        send_car_command(addr[0], car_port, command)
-                        send_car_command(addr[0], car_port, "FW050")
-                        send_car_command(addr[0], car_port, "RL090")
-                        send_car_command(addr[0], car_port, "FW070")
-                        send_car_command(addr[0], car_port, "RL090")
-                        time.sleep(2)
-                    except (ConnectionError, OSError, RuntimeError, ValueError, json.JSONDecodeError) as exc:
-                        print(f"Bullseye scan movement failed: {exc}")
-                    else:
-                        scan_step = (scan_step + 1) % len(SCAN_DIRECTIONS)
-                elif scan_step:
-                    print("Non-bullseye object found; bullseye scan complete.")
-                    scan_step = 0
 
             if cv2.waitKey(1) & 0xFF == ord('q'):
                 break
@@ -190,25 +140,14 @@ def main():
     )
     parser.add_argument("--port", type=int, default=5005, help="TCP port to listen on when --serve is used.")
     parser.add_argument(
-        "--car-port", type=int, default=CAR_PORT,
-        help="Raspberry Pi movement-server port used for bullseye scanning."
-    )
-    parser.add_argument(
-        "--scan-degrees", type=int, default=DEFAULT_SCAN_DEGREES,
-        help="Degrees to rotate for each right/left bullseye scan step."
-    )
-    parser.add_argument(
-        "--conf", type=float, default=0.2,
+        "--conf", type=float, default=0.15,
         help="Confidence threshold for detections (0-1). Raise this if random objects (e.g. legs, chairs) "
              "get flagged as false positives; lower it if real targets aren't being picked up."
     )
     args = parser.parse_args()
 
-    if not 1 <= args.scan_degrees <= 359:
-        parser.error("--scan-degrees must be between 1 and 359")
-
     if args.serve:
-        run_serve(args.port, args.conf, args.car_port, args.scan_degrees)
+        run_serve(args.port, args.conf)
     else:
         run_standalone(args.conf)
 

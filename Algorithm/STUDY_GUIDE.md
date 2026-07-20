@@ -65,7 +65,7 @@ Think of the floor as a checkerboard. Each square on the checkerboard is **10 cm
   (0,0)
 ```
 
-The robot always starts in the **bottom-left corner** (the "start zone"), specifically at position **(20 cm, 20 cm)** — the center of the 40×40 cm start zone.
+The robot always starts in the **bottom-left corner** (the "start zone"), specifically at position **(25 cm, 40 cm)** — the front-center point of the robot when its bottom-left wheel edge sits at (10 cm, 10 cm), per live-hardware calibration (starting flush at (0,0) was too tight for the real car).
 
 ### Measuring position
 
@@ -124,8 +124,8 @@ assert cm_to_px(100, 100) == (400, 400)   # center → center ✓
 | `ROBOT_W_CM` | 20 | Robot is 20 cm wide |
 | `ROBOT_H_CM` | 21 | Robot is 21 cm tall |
 | `APPROACH_CM` | 20 | Robot stops 20 cm from the obstacle face |
-| `START_X_CM` | 20 | Robot starts 20 cm from left wall |
-| `START_Y_CM` | 20 | Robot starts 20 cm from bottom wall |
+| `START_X_CM` | 25 | Robot starts 25 cm from left wall |
+| `START_Y_CM` | 40 | Robot starts 40 cm from bottom wall |
 | `START_THETA` | 90 | Robot starts facing North |
 
 ---
@@ -145,7 +145,7 @@ class RobotState:
 ```
 
 **Example:** `RobotState(x=20, y=20, theta=90)` means:  
-*"The robot is 20 cm from the left, 20 cm from the bottom, and facing North."* That's the starting position.
+*"The robot is 25 cm from the left, 40 cm from the bottom, and facing North."* That's the starting position.
 
 ### Obstacle — the block's ID card
 
@@ -817,7 +817,7 @@ def get_commands(obstacles):
 
 ### Step-by-step in plain English
 
-1. **Start** the robot at (20, 20) facing North.
+1. **Start** the robot at (25, 40) facing North.
 2. **Compute the 5 target poses** — one for each obstacle (where to stand and which way to face for the photo).
 3. **Try all 120 orderings** of those 5 poses. Calculate the total Dubins distance for each ordering. Keep the shortest.
 4. **Build the command list**: for each consecutive pair of poses in the chosen order, find the shortest route that stays inside the arena, then translate that route into FW/AL/AR commands.
@@ -1003,7 +1003,7 @@ assert len(result) == 5   ✓
 |---|---|
 | Arena size | 200 × 200 cm |
 | Grid | 20 × 20 cells, each 10 × 10 cm |
-| Robot start | (20 cm, 20 cm), facing 90° (North) |
+| Robot start | (25 cm, 40 cm), facing 90° (North) |
 | Turning radius | 25 cm |
 | Photo distance | 20 cm from face surface (= 25 cm from block center) |
 | Robot size | 20 × 21 cm |

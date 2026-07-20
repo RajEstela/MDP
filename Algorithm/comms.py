@@ -17,6 +17,7 @@ WAIT commands are simulator-only and are silently skipped.
 """
 import json
 import socket
+from typing import Callable
 from simulator.types import Command
 
 from app_config import RPI_HOST, RPI_PORT, RPI_TIMEOUT_S as _TIMEOUT_S
@@ -66,7 +67,7 @@ class CarConnection:
         self._seq += 1
         payload = json.dumps({"id": self._seq, "cmd": wire}) + "\n"
         self._sock.sendall(payload.encode())
-        print(f"[comms] → {wire}", end='  ', flush=True)
+        print(f"[comms] -> {wire}", end='  ', flush=True)
 
         # RPi sends a JSON response without a trailing newline; use recv() directly.
         raw = self._sock.recv(4096).decode().strip()
@@ -76,20 +77,39 @@ class CarConnection:
             raise RuntimeError(f"Bad response from RPi: {raw!r}") from exc
 
         status = resp.get("status")
-        print(f"← {status} {resp.get('msg', '')}")
+        print(f"<- {status} {resp.get('msg', '')}")
         if status != 200:
             raise RuntimeError(f"RPi error {status}: {resp.get('msg')}")
 
-    def send_commands(self, cmds: list[Command]) -> None:
-        """Send a sequence of commands, waiting for status 200 after each one."""
+    def send_commands(
+        self,
+        cmds: list[Command],
+        on_progress: "Callable[[int, int, str], None] | None" = None,
+        on_obstacle_reached: "Callable[[str], None] | None" = None,
+    ) -> None:
+        """Send a sequence of commands, waiting for status 200 after each one.
+
+        If on_progress is given, it's called as on_progress(sent, total, wire)
+        after each successful command acknowledgment.
+
+        WAIT commands are simulator-only and are never sent to the car, but a
+        WAIT carrying an obstacle_id marks "the car just finished driving to
+        this obstacle" — if on_obstacle_reached is given, it's called with
+        that obstacle_id at exactly that point in the sequence.
+        """
         total = sum(1 for c in cmds if c.kind != 'WAIT')
         sent = 0
         for cmd in cmds:
             if cmd.kind == 'WAIT':
+                if on_obstacle_reached and cmd.obstacle_id:
+                    on_obstacle_reached(cmd.obstacle_id)
                 continue
             sent += 1
+            wire = serialize(cmd)
             print(f"[comms] ({sent}/{total})", end=' ')
             self.send_command(cmd)
+            if on_progress:
+                on_progress(sent, total, wire)
 
     def __enter__(self):
         self.connect()

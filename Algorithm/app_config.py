@@ -29,9 +29,12 @@ DEFAULTS: dict = {
         'step_cm_per_frame': 2.0,
         'deg_per_frame': 3.0,
         'approach_cm': 20,
-        'start_x_cm': 20.0,
-        'start_y_cm': 30.0,
+        'min_approach_cm': 10.0,
+        'max_approach_cm': 40.0,
+        'start_x_cm': 25.0,
+        'start_y_cm': 40.0,
         'start_theta': 90.0,
+        'wall_margin_cm': 10.0,
     },
     'default_obstacles': [
         {'x': 50,  'y': 100, 'face': 'N'},
@@ -127,8 +130,11 @@ ROBOT_H_CM = _cfg['simulator']['robot_h_cm']
 STEP_CM_PER_FRAME = _cfg['simulator']['step_cm_per_frame']
 DEG_PER_FRAME = _cfg['simulator']['deg_per_frame']
 APPROACH_CM = _cfg['simulator']['approach_cm']
+MIN_APPROACH_CM = _cfg['simulator']['min_approach_cm']
+MAX_APPROACH_CM = _cfg['simulator']['max_approach_cm']
 START_X_CM = _cfg['simulator']['start_x_cm']
 START_Y_CM = _cfg['simulator']['start_y_cm']
 START_THETA = _cfg['simulator']['start_theta']
+WALL_MARGIN_CM = _cfg['simulator']['wall_margin_cm']
 
 DEFAULT_OBSTACLES = [Obstacle(x=o['x'], y=o['y'], face=o['face']) for o in _cfg['default_obstacles']]
