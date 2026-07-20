@@ -85,16 +85,24 @@ class CarConnection:
         self,
         cmds: list[Command],
         on_progress: "Callable[[int, int, str], None] | None" = None,
+        on_obstacle_reached: "Callable[[str], None] | None" = None,
     ) -> None:
         """Send a sequence of commands, waiting for status 200 after each one.
 
         If on_progress is given, it's called as on_progress(sent, total, wire)
         after each successful command acknowledgment.
+
+        WAIT commands are simulator-only and are never sent to the car, but a
+        WAIT carrying an obstacle_id marks "the car just finished driving to
+        this obstacle" — if on_obstacle_reached is given, it's called with
+        that obstacle_id at exactly that point in the sequence.
         """
         total = sum(1 for c in cmds if c.kind != 'WAIT')
         sent = 0
         for cmd in cmds:
             if cmd.kind == 'WAIT':
+                if on_obstacle_reached and cmd.obstacle_id:
+                    on_obstacle_reached(cmd.obstacle_id)
                 continue
             sent += 1
             wire = serialize(cmd)

@@ -589,6 +589,31 @@ def test_grid_leg_reverse_h_uses_bw_facing_away():
     assert abs(move_cmds[0].value - 50) < 0.01
 
 
+# ── Obstacle ID carried through to the WAIT command ─────────────────────────
+
+def test_get_commands_tags_wait_with_obstacle_id():
+    obs = Obstacle(x=100, y=100, face='N', id='B1')
+    cmds = get_commands([obs])
+    waits = [c for c in cmds if c.kind == 'WAIT']
+    assert len(waits) == 1
+    assert waits[0].obstacle_id == 'B1'
+
+
+def test_get_commands_wait_obstacle_id_none_when_obstacle_has_no_id():
+    obs = Obstacle(x=100, y=100, face='N')  # id defaults to None (local/demo obstacle)
+    cmds = get_commands([obs])
+    waits = [c for c in cmds if c.kind == 'WAIT']
+    assert waits[0].obstacle_id is None
+
+
+def test_get_top_n_routes_tags_wait_with_obstacle_id():
+    obs = Obstacle(x=100, y=100, face='N', id='B2')
+    routes = get_top_n_routes([obs], n=1)
+    cmds, _ = routes[0]
+    waits = [c for c in cmds if c.kind == 'WAIT']
+    assert waits[0].obstacle_id == 'B2'
+
+
 def test_no_collision_random_arenas():
     """50 random arenas: every planned leg must clear ALL obstacles (including target)."""
     from simulator.config import START_X_CM, START_Y_CM, START_THETA

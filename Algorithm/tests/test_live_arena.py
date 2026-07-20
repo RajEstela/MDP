@@ -41,3 +41,38 @@ def test_process_snapshot_sends_route_ready_status_without_execute(monkeypatch):
     states = [c.decode() for c in sent_payloads]
     assert any('"state":"route_ready"' in s for s in states)
     assert not any('"state":"running"' in s for s in states)
+
+
+def test_process_snapshot_sends_obstacle_reached_status_when_executing(monkeypatch):
+    commands = [Command("FW", 10.0), Command("WAIT", 300.0, obstacle_id="B1")]
+    monkeypatch.setattr(live_arena, "get_commands", lambda obstacles, start=None: commands)
+
+    class _FakeCarConnection:
+        def __init__(self, host=None):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            pass
+
+        def send_commands(self, cmds, on_progress=None, on_obstacle_reached=None):
+            for cmd in cmds:
+                if cmd.kind == "WAIT" and cmd.obstacle_id and on_obstacle_reached:
+                    on_obstacle_reached(cmd.obstacle_id)
+
+    monkeypatch.setattr(live_arena, "CarConnection", _FakeCarConnection)
+
+    snapshot = {
+        "version": 1, "type": "arena", "revision": 3,
+        "grid": {"columns": 20, "rows": 20, "cellCm": 10, "origin": "bottom-left"},
+        "robot": {"x": 1, "y": 1, "direction": "N"},
+        "obstacles": [],
+    }
+    sock = Mock()
+    live_arena.process_snapshot(sock, snapshot, host="1.2.3.4", execute=True)
+
+    sent_payloads = [call.args[0] for call in sock.sendall.call_args_list]
+    states = [c.decode() for c in sent_payloads]
+    assert any('"state":"obstacle_reached"' in s and '"obstacleId":"B1"' in s for s in states)

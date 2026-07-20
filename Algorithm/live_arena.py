@@ -43,9 +43,12 @@ def process_snapshot(sock, snapshot: dict, host: str, execute: bool) -> None:
         print("[route] calculation complete; --execute was not supplied")
         return
 
+    def on_obstacle_reached(obstacle_id: str) -> None:
+        send_status(sock, revision, "obstacle_reached", f"Reached obstacle {obstacle_id}", obstacleId=obstacle_id)
+
     send_status(sock, revision, "running", "Sending route to nanocar")
     with CarConnection(host=host) as car:
-        car.send_commands(commands)
+        car.send_commands(commands, on_obstacle_reached=on_obstacle_reached)
     send_status(sock, revision, "completed", "Route completed")
 
 

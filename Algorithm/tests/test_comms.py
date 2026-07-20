@@ -51,3 +51,24 @@ def test_send_commands_without_on_progress_still_sends_all():
     conn = _make_connection(n_responses=1)
     conn.send_commands([Command("BW", 20.0)])
     assert len(conn._sock.sent) == 1
+
+
+def test_send_commands_calls_on_obstacle_reached_for_tagged_wait():
+    conn = _make_connection(n_responses=2)
+    reached = []
+    conn.send_commands(
+        [
+            Command("FW", 50.0),
+            Command("WAIT", 300.0, obstacle_id="B1"),
+            Command("RL", 90.0),
+            Command("WAIT", 300.0),  # no obstacle_id (e.g. local/demo obstacle)
+        ],
+        on_obstacle_reached=lambda obstacle_id: reached.append(obstacle_id),
+    )
+    assert reached == ["B1"]
+
+
+def test_send_commands_wait_never_sent_to_car():
+    conn = _make_connection(n_responses=1)
+    conn.send_commands([Command("WAIT", 300.0, obstacle_id="B1"), Command("FW", 10.0)])
+    assert len(conn._sock.sent) == 1  # only the FW, WAIT is simulator-only

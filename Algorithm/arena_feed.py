@@ -51,11 +51,13 @@ def arena_to_obstacles(snapshot: dict) -> list[Obstacle]:
         face = str(item.get("direction", "")).upper()
         if face not in ("N", "E", "S", "W"):
             raise ValueError(f"invalid direction for obstacle {item.get('id')}")
+        obstacle_id = str(item.get("id", "")).strip().upper() or None
         obstacles.append(
             Obstacle(
                 x=int(item["x"]) * cell_cm,
                 y=int(item["y"]) * cell_cm,
                 face=face,
+                id=obstacle_id,
             )
         )
     return obstacles

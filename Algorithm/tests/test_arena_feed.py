@@ -25,7 +25,7 @@ def _snapshot(**overrides) -> dict:
 
 def test_arena_to_obstacles_converts_grid_cells_to_cm():
     obstacles = arena_to_obstacles(_snapshot())
-    assert obstacles == [Obstacle(x=50, y=160, face='S')]
+    assert obstacles == [Obstacle(x=50, y=160, face='S', id='B1')]
 
 
 def test_arena_to_obstacles_rejects_wrong_type():
@@ -58,6 +58,12 @@ def test_arena_to_obstacles_rejects_invalid_direction():
     snap = _snapshot(obstacles=[{"id": "B1", "x": 5, "y": 16, "direction": "X"}])
     with pytest.raises(ValueError):
         arena_to_obstacles(snap)
+
+
+def test_arena_to_obstacles_missing_id_yields_none():
+    snap = _snapshot(obstacles=[{"x": 5, "y": 16, "direction": "S"}])
+    obstacles = arena_to_obstacles(snap)
+    assert obstacles[0].id is None
 
 
 # ── arena_to_robot_start ─────────────────────────────────────────────────

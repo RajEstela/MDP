@@ -175,11 +175,18 @@ def _run_car_executor(commands: list, host: str, sock, revision: int, live_state
             live_state.exec_progress["index"] = sent
             live_state.exec_progress["last_wire"] = wire
 
+    def on_obstacle_reached(obstacle_id: str) -> None:
+        with live_state.sock_lock:
+            arena_feed.send_status(
+                sock, revision, "obstacle_reached", f"Reached obstacle {obstacle_id}",
+                obstacleId=obstacle_id,
+            )
+
     with live_state.sock_lock:
         arena_feed.send_status(sock, revision, "running", "Sending route to nanocar")
     try:
         with CarConnection(host=host) as car:
-            car.send_commands(commands, on_progress=on_progress)
+            car.send_commands(commands, on_progress=on_progress, on_obstacle_reached=on_obstacle_reached)
     except Exception as exc:
         with live_state.lock:
             live_state.exec_progress["error"] = str(exc)

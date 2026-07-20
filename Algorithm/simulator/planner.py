@@ -435,7 +435,7 @@ def get_top_n_routes(
             obs = obs_by_pose[id(pose)]
             leg_cmds, leg_len, actual_pose = _best_leg_to_obstacle(current, obs, obstacles)
             cmds += leg_cmds
-            cmds.append(Command('WAIT', 5.0 * FPS))
+            cmds.append(Command('WAIT', 5.0 * FPS, obstacle_id=obs.id))
             total_actual += leg_len
             current = actual_pose
         routes.append((cmds, total_actual))
@@ -457,6 +457,6 @@ def get_commands(obstacles: list[Obstacle], start: RobotState | None = None) -> 
         obs = obs_by_pose[id(pose)]
         leg_cmds, _, actual_pose = _best_leg_to_obstacle(current, obs, obstacles)
         cmds += leg_cmds
-        cmds.append(Command('WAIT', 5.0 * FPS))
+        cmds.append(Command('WAIT', 5.0 * FPS, obstacle_id=obs.id))
         current = actual_pose
     return cmds

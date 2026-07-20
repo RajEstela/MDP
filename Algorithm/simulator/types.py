@@ -13,12 +13,14 @@ class Obstacle:
     x: int
     y: int
     face: str  # 'N' | 'S' | 'E' | 'W' — which face carries the target image
+    id: str | None = None  # arena-supplied obstacle ID (e.g. 'B1'); None for local/demo obstacles
 
 
 @dataclass
 class Command:
     kind: str    # 'FW' | 'BW' | 'RL' | 'RR' | 'WAIT'
     value: float # cm for FW/BW; degrees for RL/RR; frames for WAIT
+    obstacle_id: str | None = None  # set on the WAIT after a leg: which obstacle was just reached
 
 
 @dataclass
