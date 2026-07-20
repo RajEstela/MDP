@@ -17,15 +17,15 @@ DRIVE_SPEED = 1000
 ROTATION_SPEED = 100
 FULL_LOCK = 1000
 CM_PER_SECOND = 81.0
-LEFT_STEP_DURATION = 0.484
-RIGHT_STEP_DURATION = 0.509
+LEFT_STEP_DURATION = 0.4575
+RIGHT_STEP_DURATION = 0.473
 DEGREES_PER_STEP = 15.0
 SEND_INTERVAL = 0.01
 MANUAL_DRIVE_TIMEOUT = 0.5
 
 DURATION_OFFSET_BASE = 0.12
-FORWARD_OFFSET_ANGLE = 290
-BACKWARD_OFFSET_ANGLE = -240
+FORWARD_OFFSET_ANGLE = 260
+BACKWARD_OFFSET_ANGLE = -365
 
 
 def _packet_value(value):
@@ -151,11 +151,22 @@ class NanoCarLink:
         remainder = cm % segment
         for i in range(full):
             self.drive(DRIVE_SPEED, offset_angle, segment / cm_per_second)
-            self.stop(0.1)
+            self.stop(0.5)
         if remainder > 0:
             offset = 0
             if cm <= segment:
                 offset = DURATION_OFFSET_BASE
+            
+            _cm_per_second = cm_per_second
+            _offset_angle = offset_angle
+            if offset_angle != FORWARD_OFFSET_ANGLE:
+                if remainder == 20:
+                    _cm_per_second = 108
+                    _offset_angle = 330
+                elif remainder == 10:
+                    _cm_per_second = 110
+                    _offset_angle = 320
+
             duration = remainder / cm_per_second + offset
             self.drive(DRIVE_SPEED, offset_angle, duration)
         self.stop()
@@ -166,11 +177,22 @@ class NanoCarLink:
         remainder = cm % segment
         for i in range(full):
             self.drive(-DRIVE_SPEED, offset_angle, segment / cm_per_second)
-            self.stop(0.1)
-        if remainder > 0:
+            self.stop(0.5)
+        if remainder > 0:                 
             offset = 0
             if remainder >= 10 and cm <= segment:
                 offset = DURATION_OFFSET_BASE
+
+            _cm_per_second = cm_per_second
+            _offset_angle = offset_angle
+            if offset_angle != BACKWARD_OFFSET_ANGLE:
+                if remainder == 20:
+                    _cm_per_second = 110
+                    _offset_angle = -450
+                elif remainder == 10:
+                    _cm_per_second = 110
+                    _offset_angle = -600
+
             duration = remainder / cm_per_second + offset
             self.drive(-DRIVE_SPEED, offset_angle, duration)
         self.stop()
@@ -184,7 +206,7 @@ class NanoCarLink:
             print("[ROT_L] Step " + str(i+1) + "/" + str(full_steps))
             self.drive(rotation_speed, FULL_LOCK, step_duration)
             self.drive(-rotation_speed, FULL_LOCK, step_duration)
-            self.stop(0.4)
+            self.stop(0.5)
             
         if remainder > 0:
             partial = step_duration * remainder
@@ -203,7 +225,7 @@ class NanoCarLink:
             print("[ROT_R] Step " + str(i+1) + "/" + str(full_steps))
             self.drive(rotation_speed, -FULL_LOCK, step_duration)
             self.drive(-rotation_speed, -FULL_LOCK, step_duration)
-            self.stop(0.4)
+            self.stop(0.5)
 
         if remainder > 0:
             partial = step_duration * remainder
