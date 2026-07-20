@@ -3,7 +3,19 @@ import math
 import random as _random
 
 from app_config import DEFAULT_OBSTACLES
-from simulator.config import APPROACH_CM, ARENA_CM, CELL_CM, FPS, GRID_SIZE, START_THETA, START_X_CM, START_Y_CM, WALL_MARGIN_CM
+from simulator.config import (
+    APPROACH_CM,
+    ARENA_CM,
+    CELL_CM,
+    FPS,
+    GRID_SIZE,
+    MAX_APPROACH_CM,
+    MIN_APPROACH_CM,
+    START_THETA,
+    START_X_CM,
+    START_Y_CM,
+    WALL_MARGIN_CM,
+)
 from simulator.types import Command, Obstacle, RobotState
 
 OBSTACLES: list[Obstacle] = DEFAULT_OBSTACLES
@@ -72,16 +84,16 @@ def _angle_diff(from_deg: float, to_deg: float) -> float:
     return diff if diff != -180 else 180
 
 
-def obstacle_approach_pose(obs: Obstacle) -> RobotState:
-    """Grid-aligned approach pose: apex on a grid-line intersection in front of the obstacle face."""
+def obstacle_approach_pose(obs: Obstacle, approach_cm: float = APPROACH_CM) -> RobotState:
+    """Grid-aligned approach pose: apex on a grid-line intersection in front of the obstacle face, `approach_cm` from it."""
     if obs.face == 'N':
-        return RobotState(x=obs.x, y=obs.y + CELL_CM + APPROACH_CM, theta=270)
+        return RobotState(x=obs.x, y=obs.y + CELL_CM + approach_cm, theta=270)
     if obs.face == 'S':
-        return RobotState(x=obs.x, y=obs.y - APPROACH_CM, theta=90)
+        return RobotState(x=obs.x, y=obs.y - approach_cm, theta=90)
     if obs.face == 'E':
-        return RobotState(x=obs.x + CELL_CM + APPROACH_CM, y=obs.y, theta=180)
+        return RobotState(x=obs.x + CELL_CM + approach_cm, y=obs.y, theta=180)
     # face == 'W'
-    return RobotState(x=obs.x - APPROACH_CM, y=obs.y, theta=0)
+    return RobotState(x=obs.x - approach_cm, y=obs.y, theta=0)
 
 
 def _point_hits_obstacle(x: float, y: float, obstacles: list[Obstacle]) -> bool:
@@ -236,6 +248,37 @@ def _plan_leg(
     return best_cmds, (best_dist if best_dist < float('inf') else dist)
 
 
+_APPROACH_STEP_CM = 1.0  # search granularity within [MIN_APPROACH_CM, MAX_APPROACH_CM]
+
+
+def _best_leg_to_obstacle(
+    current: RobotState,
+    obs: Obstacle,
+    obstacles: list[Obstacle],
+) -> tuple[list[Command], float, RobotState]:
+    """Plan the leg from `current` to `obs`'s target face, choosing the
+    shortest approach distance in [MIN_APPROACH_CM, MAX_APPROACH_CM] that
+    produces a collision-free, in-bounds path. `obs` itself is excluded from
+    collision checking for this leg — its own clearance zone would otherwise
+    block getting closer than _ROBOT_CLEARANCE (20cm) — every other obstacle
+    and the wall margin are still enforced. Returns (leg_cmds, leg_len,
+    approach_pose actually used). Falls back to the MAX_APPROACH_CM attempt
+    if no distance in range validates (better to be far than to report
+    nothing)."""
+    other_obstacles = [o for o in obstacles if o is not obs]
+    steps = max(1, round((MAX_APPROACH_CM - MIN_APPROACH_CM) / _APPROACH_STEP_CM))
+    fallback: tuple[list[Command], float, RobotState] | None = None
+    for i in range(steps + 1):
+        approach_cm = MIN_APPROACH_CM + i * (MAX_APPROACH_CM - MIN_APPROACH_CM) / steps
+        pose = obstacle_approach_pose(obs, approach_cm)
+        leg_cmds, leg_len = _plan_leg(current, pose, other_obstacles)
+        if fallback is None:
+            fallback = (leg_cmds, leg_len, pose)
+        if _path_in_bounds(current, leg_cmds, other_obstacles):
+            return leg_cmds, leg_len, pose
+    return fallback
+
+
 def _total_manhattan_length(start: RobotState, poses: list[RobotState]) -> float:
     total = 0.0
     current = start
@@ -275,17 +318,20 @@ def get_top_n_routes(
         ranked.append((length, list(perm)))
     ranked.sort(key=lambda x: x[0])
 
+    obs_by_pose = {id(pose): obs for obs, pose in obs_poses}
+
     routes: list[tuple[list[Command], float]] = []
     for _, ordered_poses in ranked[:n]:
         cmds: list[Command] = []
         total_actual = 0.0
         current = start
         for pose in ordered_poses:
-            leg_cmds, leg_len = _plan_leg(current, pose, obstacles)
+            obs = obs_by_pose[id(pose)]
+            leg_cmds, leg_len, actual_pose = _best_leg_to_obstacle(current, obs, obstacles)
             cmds += leg_cmds
             cmds.append(Command('WAIT', 5.0 * FPS))
             total_actual += leg_len
-            current = pose
+            current = actual_pose
         routes.append((cmds, total_actual))
 
     routes.sort(key=lambda x: x[1])
@@ -297,12 +343,14 @@ def get_commands(obstacles: list[Obstacle], start: RobotState | None = None) -> 
         start = RobotState(x=START_X_CM, y=START_Y_CM, theta=START_THETA)
     obs_poses = [(obs, obstacle_approach_pose(obs)) for obs in obstacles]
     poses = [p for _, p in obs_poses]
+    obs_by_pose = {id(pose): obs for obs, pose in obs_poses}
     ordered_poses = _hamiltonian_optimal_order(start, poses)
     current = start
     cmds: list[Command] = []
     for pose in ordered_poses:
-        leg_cmds, _ = _plan_leg(current, pose, obstacles)
+        obs = obs_by_pose[id(pose)]
+        leg_cmds, _, actual_pose = _best_leg_to_obstacle(current, obs, obstacles)
         cmds += leg_cmds
         cmds.append(Command('WAIT', 5.0 * FPS))
-        current = pose
+        current = actual_pose
     return cmds

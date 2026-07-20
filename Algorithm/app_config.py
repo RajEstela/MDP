@@ -29,6 +29,8 @@ DEFAULTS: dict = {
         'step_cm_per_frame': 2.0,
         'deg_per_frame': 3.0,
         'approach_cm': 20,
+        'min_approach_cm': 10.0,
+        'max_approach_cm': 40.0,
         'start_x_cm': 25.0,
         'start_y_cm': 40.0,
         'start_theta': 90.0,
@@ -128,6 +130,8 @@ ROBOT_H_CM = _cfg['simulator']['robot_h_cm']
 STEP_CM_PER_FRAME = _cfg['simulator']['step_cm_per_frame']
 DEG_PER_FRAME = _cfg['simulator']['deg_per_frame']
 APPROACH_CM = _cfg['simulator']['approach_cm']
+MIN_APPROACH_CM = _cfg['simulator']['min_approach_cm']
+MAX_APPROACH_CM = _cfg['simulator']['max_approach_cm']
 START_X_CM = _cfg['simulator']['start_x_cm']
 START_Y_CM = _cfg['simulator']['start_y_cm']
 START_THETA = _cfg['simulator']['start_theta']

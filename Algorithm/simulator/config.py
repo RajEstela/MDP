@@ -6,6 +6,8 @@ from app_config import (
     DEG_PER_FRAME,
     FPS,
     GRID_SIZE,
+    MAX_APPROACH_CM,
+    MIN_APPROACH_CM,
     ROBOT_H_CM,
     ROBOT_W_CM,
     START_THETA,
