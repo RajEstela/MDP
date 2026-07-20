@@ -153,6 +153,28 @@ def record_image_result(obstacle_id, target_id):
         image_results.append((time.monotonic(), str(obstacle_id), int(target_id)))
 
 
+def normalize_obstacle_id(obstacle_id):
+    value = str(obstacle_id).strip().upper()
+    if not value:
+        raise ValueError("Obstacle ID cannot be empty")
+    return value if value.startswith("B") else "B" + value
+
+
+def publish_target_update(obstacle_id, target_id):
+    """Cache and broadcast an Android-compatible TARGET update."""
+    normalized_id = normalize_obstacle_id(obstacle_id)
+    target_message = "TARGET," + normalized_id + "," + str(int(target_id))
+
+    # Keep the cached arena consistent, but do not send this change back to
+    # the algorithm: doing so would look like a new arena revision and could
+    # cause the route to be planned/executed again.
+    apply_arena_delta(target_message)
+
+    broadcast_to_bluetooth(target_message)
+    print("[IMG] Published " + target_message + " to Android")
+    return target_message
+
+
 def scan_image_results(scan_seconds):
     if scan_seconds <= 0:
         raise ValueError("scan seconds must be positive")
@@ -366,6 +388,7 @@ def handle_command(raw, source="unknown"):
     scan_target_id = None
     scan_target_count = None
     scan_sample_count = None
+    target_update = None
     try:
         raw = raw.strip()
         if raw.startswith("{"):
@@ -439,14 +462,13 @@ def handle_command(raw, source="unknown"):
             if len(parts) != 3:
                 raise ValueError("SCAN requires one duration value and then one variable id value")
             scan_seconds = float(parts[1])
-            obsticle_id = parts[2]
+            obstacle_id = normalize_obstacle_id(parts[2])
             scan_target_id, scan_target_count, scan_sample_count = scan_image_results(scan_seconds)
-
-            # return ",".join(['TARGET', obsticle_id, scan_target_id])
-            
+             
             if scan_target_id is None:
                 status, resp_msg = 200, "SCAN OK but no detections"
             else:
+                target_update = publish_target_update(obstacle_id, scan_target_id)
                 status, resp_msg = 200, "SCAN OK"
 
         else:
@@ -466,6 +488,7 @@ def handle_command(raw, source="unknown"):
         response["targetId"] = scan_target_id
         response["targetCount"] = scan_target_count
         response["sampleCount"] = scan_sample_count
+        response["targetUpdate"] = target_update
     return json.dumps(response)
 
 
