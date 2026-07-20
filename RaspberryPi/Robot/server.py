@@ -163,7 +163,7 @@ def scan_image_results(scan_seconds):
 
     with image_results_lock:
         target_ids = [target_id for timestamp, _, target_id in image_results if start_time <= timestamp <= deadline]
-
+    
     if not target_ids:
         return None, 0, 0
 
@@ -351,7 +351,7 @@ def handle_command(raw, source="unknown"):
         BWxxx  - move backward xxx cm       e.g. BW010 = backward 10cm
         RLxxx  - rotate left xxx degrees    e.g. RL090 = rotate left 90 deg
         RRxxx  - rotate right xxx degrees   e.g. RR045 = rotate right 45 deg
-        SCAN,x - scan image results for x seconds and return the majority target
+        SCAN,x,id - scan image results for x seconds and return the majority target
         TFW... - tune move forward          e.g. TFW010/190/98 (cm, offset angle, cm/sec)
         TBW... - tune move backward         e.g. TBW010/-220/98 (cm, offset angle, cm/sec)
         TRL... - tune rotate left           e.g. TRL090/100/0.455 (degrees, rotation speed, step duration)
@@ -435,11 +435,15 @@ def handle_command(raw, source="unknown"):
             status, resp_msg = 200, msg + " OK"
 
         elif msg.startswith("SCAN,"):
-            parts = msg.split(",", 1)
-            if len(parts) != 2:
-                raise ValueError("SCAN requires one duration value")
+            parts = msg.split(",", 2)
+            if len(parts) != 3:
+                raise ValueError("SCAN requires one duration value and then one variable id value")
             scan_seconds = float(parts[1])
+            obsticle_id = parts[2]
             scan_target_id, scan_target_count, scan_sample_count = scan_image_results(scan_seconds)
+
+            # return ",".join(['TARGET', obsticle_id, scan_target_id])
+            
             if scan_target_id is None:
                 status, resp_msg = 200, "SCAN OK but no detections"
             else:
