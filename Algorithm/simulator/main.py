@@ -136,6 +136,7 @@ class _LiveState:
 
     def __init__(self) -> None:
         self.lock = threading.Lock()
+        self.sock_lock = threading.Lock()
         self.connection_status = "connecting"
         self.last_error: str | None = None
         self.last_error_time: float = 0.0
@@ -159,7 +160,8 @@ def _on_snapshot(snapshot: dict, sock, out_queue: "queue.Queue", live_state: _Li
         live_state.set_error(str(exc))
         raise
     revision = int(snapshot.get("revision", 0))
-    arena_feed.send_status(sock, revision, "planning", "Calculating route")
+    with live_state.sock_lock:
+        arena_feed.send_status(sock, revision, "planning", "Calculating route")
     out_queue.put((obstacles, start, revision, sock))
 
 
@@ -173,7 +175,8 @@ def _run_car_executor(commands: list, host: str, sock, revision: int, live_state
             live_state.exec_progress["index"] = sent
             live_state.exec_progress["last_wire"] = wire
 
-    arena_feed.send_status(sock, revision, "running", "Sending route to nanocar")
+    with live_state.sock_lock:
+        arena_feed.send_status(sock, revision, "running", "Sending route to nanocar")
     try:
         with CarConnection(host=host) as car:
             car.send_commands(commands, on_progress=on_progress)
@@ -181,12 +184,14 @@ def _run_car_executor(commands: list, host: str, sock, revision: int, live_state
         with live_state.lock:
             live_state.exec_progress["error"] = str(exc)
             live_state.exec_progress["done"] = True
-        arena_feed.send_status(sock, revision, "error", str(exc))
+        with live_state.sock_lock:
+            arena_feed.send_status(sock, revision, "error", str(exc))
         return
 
     with live_state.lock:
         live_state.exec_progress["done"] = True
-    arena_feed.send_status(sock, revision, "completed", "Route completed")
+    with live_state.sock_lock:
+        arena_feed.send_status(sock, revision, "completed", "Route completed")
 
 
 def _draw_connection_banner(surface, font, live_state: _LiveState) -> None:
@@ -365,10 +370,11 @@ def _run_live(host: str, execute: bool, max_frames: int | None = None) -> None:
                         active = None
                 anim_frames += 1
                 if not cmd_queue and active is None:
-                    arena_feed.send_status(
-                        current_sock, current_revision, "route_ready", "Route calculated",
-                        commandCount=sum(1 for c in opt_cmds if c.kind != 'WAIT'),
-                    )
+                    with live_state.sock_lock:
+                        arena_feed.send_status(
+                            current_sock, current_revision, "route_ready", "Route calculated",
+                            commandCount=sum(1 for c in opt_cmds if c.kind != 'WAIT'),
+                        )
                     phase = 'executing' if execute else 'done'
 
             draw_robot(screen, state)
