@@ -155,14 +155,14 @@ def run_serve(port: int, conf: float, car_port: int, scan_degrees: int):
 
                 if target_id == BULLSEYE_ID:
                     direction = SCAN_DIRECTIONS[scan_step]
-                    command = f"RR085"
+                    command = f"RR080"
                     print(f"Bullseye scan: sending {command} to the car...")
                     try:
                         send_car_command(addr[0], car_port, command)
                         send_car_command(addr[0], car_port, "FW050")
-                        send_car_command(addr[0], car_port, "RL090")
+                        send_car_command(addr[0], car_port, "RL085")
                         send_car_command(addr[0], car_port, "FW070")
-                        send_car_command(addr[0], car_port, "RL090")
+                        send_car_command(addr[0], car_port, "RL085")
                         time.sleep(2)
                     except (ConnectionError, OSError, RuntimeError, ValueError, json.JSONDecodeError) as exc:
                         print(f"Bullseye scan movement failed: {exc}")
