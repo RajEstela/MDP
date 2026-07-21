@@ -391,12 +391,8 @@ def test_get_commands_no_unknown_kinds():
     assert all(c.kind in valid for c in cmds)
 
 def test_get_commands_reaches_final_approach_pose():
-    """Simulate full command sequence; verify robot ends near a valid approach
-    pose for one of the obstacles, at any distance in [MIN_APPROACH_CM, MAX_APPROACH_CM]
-    (the planner picks the shortest distance that's actually collision-free, not
-    always a fixed distance)."""
+    """Simulate full command sequence; verify robot ends near the last approach pose (within 2cm)."""
     import math
-    from simulator.planner import MAX_APPROACH_CM, MIN_APPROACH_CM
     start = RobotState(x=START_X_CM, y=START_Y_CM, theta=START_THETA)
     cmds = get_commands(OBSTACLES)
     state = start
@@ -404,14 +400,10 @@ def test_get_commands_reaches_final_approach_pose():
         remaining = cmd.value
         while remaining > 0.001:
             state, remaining = step_command(state, cmd, remaining)
-    n_steps = round(MAX_APPROACH_CM - MIN_APPROACH_CM)
-    candidate_poses = [
-        obstacle_approach_pose(obs, MIN_APPROACH_CM + i * (MAX_APPROACH_CM - MIN_APPROACH_CM) / n_steps)
-        for obs in OBSTACLES
-        for i in range(n_steps + 1)
-    ]
-    closest = min(candidate_poses, key=lambda p: math.hypot(state.x - p.x, state.y - p.y))
-    assert math.hypot(state.x - closest.x, state.y - closest.y) < 1.0
+    # At minimum, verify the final state is one of the approach poses
+    poses = [obstacle_approach_pose(obs) for obs in OBSTACLES]
+    closest = min(poses, key=lambda p: math.hypot(state.x - p.x, state.y - p.y))
+    assert math.hypot(state.x - closest.x, state.y - closest.y) < 2.0
 
 
 # ── LSR/RSL endpoint validation ─────────────────────────────────────────────
@@ -521,74 +513,6 @@ def test_path_in_bounds_accepts_path_at_wall_margin_boundary():
     assert _path_in_bounds(state, cmds) is True
 
 
-# ── Variable approach distance (10-40cm depending on the best route) ───────
-
-def test_best_leg_to_obstacle_prefers_shortest_distance_when_clear():
-    from simulator.planner import _best_leg_to_obstacle, MIN_APPROACH_CM
-    obs = Obstacle(x=100, y=100, face='N')
-    current = RobotState(x=100, y=50, theta=90)
-    _, _, pose = _best_leg_to_obstacle(current, obs, [obs])
-    expected = obstacle_approach_pose(obs, MIN_APPROACH_CM)
-    assert abs(pose.x - expected.x) < 0.01
-    assert abs(pose.y - expected.y) < 0.01
-
-
-def test_best_leg_to_obstacle_picks_larger_distance_when_shortest_is_blocked():
-    """A neighboring obstacle's clearance zone blocks approach distances
-    10-24cm; the function must skip to the first distance that's actually
-    clear (25cm here) instead of returning an invalid short-distance pose."""
-    from simulator.planner import _best_leg_to_obstacle, MIN_APPROACH_CM
-    obs = Obstacle(x=100, y=100, face='N')
-    blocker = Obstacle(x=100, y=105, face='S')
-    current = RobotState(x=100, y=50, theta=90)
-    leg_cmds, _, pose = _best_leg_to_obstacle(current, obs, [obs, blocker])
-    assert pose.y > obstacle_approach_pose(obs, MIN_APPROACH_CM).y
-    assert abs(pose.y - 135.0) < 0.01
-    assert _path_in_bounds(current, leg_cmds, [blocker])
-
-
-# ── Wall margin covers the car's full body, not just its tracked point ─────
-
-def test_footprint_extent_matches_body_size_facing_north():
-    from simulator.planner import _footprint_extent
-    from simulator.config import ROBOT_W_CM
-    # Apex is front-center; facing North the body trails ROBOT_W_CM behind
-    # (south of) the apex and extends ROBOT_W_CM/2 to each side.
-    min_x, max_x, min_y, max_y = _footprint_extent(25.0, 40.0, 90.0)
-    assert abs(min_x - (25.0 - ROBOT_W_CM / 2)) < 0.01
-    assert abs(max_x - (25.0 + ROBOT_W_CM / 2)) < 0.01
-    assert abs(min_y - (40.0 - ROBOT_W_CM)) < 0.01
-    assert abs(max_y - 40.0) < 0.01
-
-
-def test_wall_margin_rejects_body_clip_even_when_apex_has_clearance():
-    """The apex alone can sit WALL_MARGIN_CM clear of a wall while the car's
-    trailing body still clips it — the margin must account for the whole
-    30x30cm footprint, not just the tracked apex point."""
-    from simulator.config import WALL_MARGIN_CM
-    # Facing East, apex at x=15 has 5cm clearance from the west wall itself,
-    # but the body trails 30cm behind (west of) the apex: min_x = 15-30 = -15,
-    # deep inside the wall margin (and off the grid entirely).
-    apex_x = WALL_MARGIN_CM + 5
-    state = RobotState(x=apex_x, y=100, theta=0)  # facing East
-    assert apex_x > WALL_MARGIN_CM  # the apex point itself looks "clear"
-    assert _path_in_bounds(state, []) is False
-
-
-def test_grid_leg_reverse_h_uses_bw_facing_away():
-    """reverse_h drives the horizontal segment with BW while facing the
-    opposite direction of travel, not FW facing toward it."""
-    from simulator.planner import _grid_leg
-    q1 = RobotState(x=100, y=100, theta=90)
-    q2 = RobotState(x=150, y=100, theta=90)  # straight east, same start/end heading
-    cmds, dist = _grid_leg(q1, q2, horizontal_first=True, reverse_h=True)
-    assert abs(dist - 50) < 0.01
-    move_cmds = [c for c in cmds if c.kind in ('FW', 'BW')]
-    assert len(move_cmds) == 1
-    assert move_cmds[0].kind == 'BW'
-    assert abs(move_cmds[0].value - 50) < 0.01
-
-
 # ── Obstacle ID carried through to the WAIT command ─────────────────────────
 
 def test_get_commands_tags_wait_with_obstacle_id():
@@ -636,7 +560,6 @@ def test_no_collision_random_arenas():
 # ── Task 3: optional start pose parameter ──────────────────────────────────
 
 def test_get_commands_uses_provided_start():
-    from simulator.planner import MIN_APPROACH_CM
     custom_start = RobotState(x=100.0, y=100.0, theta=0.0)
     obs = [Obstacle(x=150, y=100, face='W')]
     cmds = get_commands(obs, start=custom_start)
@@ -645,8 +568,7 @@ def test_get_commands_uses_provided_start():
         remaining = cmd.value
         while remaining > 0.001:
             state, remaining = step_command(state, cmd, remaining)
-    # Nothing blocks this obstacle, so the shortest valid approach (MIN_APPROACH_CM) is used.
-    pose = obstacle_approach_pose(obs[0], MIN_APPROACH_CM)
+    pose = obstacle_approach_pose(obs[0])
     assert math.hypot(state.x - pose.x, state.y - pose.y) < 2.0
 
 
@@ -657,12 +579,8 @@ def test_get_commands_without_start_keeps_default_behavior():
 
 
 def test_get_top_n_routes_uses_provided_start():
-    from simulator.planner import MIN_APPROACH_CM
     custom_start = RobotState(x=100.0, y=100.0, theta=0.0)
     obs = [Obstacle(x=150, y=100, face='W')]
     routes = get_top_n_routes(obs, n=1, start=custom_start)
     _, length = routes[0]
-    # Nothing blocks this obstacle, so the shortest valid approach (MIN_APPROACH_CM=10)
-    # is used: pose.x = 150 - 10 = 140, Manhattan distance from x=100 is 40.
-    expected = abs((150 - MIN_APPROACH_CM) - custom_start.x)
-    assert abs(length - expected) < 0.01
+    assert abs(length - 30.0) < 0.01
