@@ -300,6 +300,7 @@ def _run_live(host: str, execute: bool, max_frames: int | None = None) -> None:
     listener.start()
 
     phase = 'waiting_for_arena'
+    phase_frames = 0
     obstacles: list[Obstacle] = []
     routes: list = []
     traced: list = []
@@ -317,7 +318,7 @@ def _run_live(host: str, execute: bool, max_frames: int | None = None) -> None:
 
     def _start_new_run(obs, start, revision, sock):
         nonlocal obstacles, routes, traced, opt_cmds, opt_len, state, cmd_queue
-        nonlocal active, remaining, anim_frames, obstacles_visited
+        nonlocal active, remaining, anim_frames, obstacles_visited, phase_frames
         nonlocal current_sock, current_revision, executor_started, phase
         obstacles = obs
         routes, traced, opt_cmds, opt_len, start = _compute(screen, font_b, obstacles, start)
@@ -330,7 +331,8 @@ def _run_live(host: str, execute: bool, max_frames: int | None = None) -> None:
         current_sock = sock
         current_revision = revision
         executor_started = False
-        phase = 'animate'
+        phase = 'show_all' if len(routes) > 1 else 'animate'
+        phase_frames = 0
         with live_state.lock:
             live_state.exec_progress = None
 
@@ -340,8 +342,12 @@ def _run_live(host: str, execute: bool, max_frames: int | None = None) -> None:
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 running = False
-            elif event.type == pygame.KEYDOWN and event.key in (pygame.K_q, pygame.K_ESCAPE):
-                running = False
+            elif event.type == pygame.KEYDOWN:
+                if event.key in (pygame.K_q, pygame.K_ESCAPE):
+                    running = False
+                elif event.key == pygame.K_SPACE and phase in ('show_all', 'highlight'):
+                    phase = 'animate'
+                    phase_frames = 0
 
         if phase in ('waiting_for_arena', 'done'):
             latest = None
@@ -362,6 +368,31 @@ def _run_live(host: str, execute: bool, max_frames: int | None = None) -> None:
                 True, (210, 210, 210),
             )
             screen.blit(msg, (ARENA_PX // 2 - msg.get_width() // 2, ARENA_PX // 2 - 12))
+
+        elif phase == 'show_all':
+            for i in range(len(routes) - 1, -1, -1):
+                draw_path(screen, traced[i], _ROUTE_COLORS[i], width=2 if i > 0 else 3)
+            draw_obstacles(screen, obstacles)
+            _draw_legend(screen, font, font_b, routes, phase, len(obstacles))
+            _text(screen, font_b, "Comparing candidate paths…  [SPACE] skip",
+                  (210, 210, 210), (10, ARENA_PX - 30))
+            phase_frames += 1
+            if phase_frames >= _SHOW_ALL_FRAMES:
+                phase = 'highlight'
+                phase_frames = 0
+
+        elif phase == 'highlight':
+            for i in range(1, len(routes)):
+                draw_path(screen, traced[i], _DIM_COLOR, width=1)
+            draw_path(screen, traced[0], _ROUTE_COLORS[0], width=3)
+            draw_obstacles(screen, obstacles)
+            _draw_legend(screen, font, font_b, routes, phase, len(obstacles))
+            _text(screen, font_b, "Optimal path selected — starting run!",
+                  (255, 215, 0), (10, ARENA_PX - 30))
+            phase_frames += 1
+            if phase_frames >= _HIGHLIGHT_FRAMES:
+                phase = 'animate'
+                phase_frames = 0
 
         elif phase in ('animate', 'executing', 'done'):
             draw_path(screen, traced[0], _ROUTE_COLORS[0], width=2)
