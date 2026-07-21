@@ -9,6 +9,7 @@ from simulator.config import (
     CELL_CM,
     FPS,
     GRID_SIZE,
+    ROBOT_W_CM,
     START_THETA,
     START_X_CM,
     START_Y_CM,
@@ -23,14 +24,15 @@ def _valid_faces(col: int, row: int) -> list[str]:
     ox = col * CELL_CM
     oy = row * CELL_CM
     m = 30.0
+    d = APPROACH_CM + ROBOT_W_CM / 2  # matches obstacle_approach_pose's actual approach distance
     faces: list[str] = []
-    if m <= ox <= ARENA_CM - m and m <= oy + CELL_CM + APPROACH_CM <= ARENA_CM - m:
+    if m <= ox <= ARENA_CM - m and m <= oy + CELL_CM + d <= ARENA_CM - m:
         faces.append('N')
-    if m <= ox <= ARENA_CM - m and m <= oy - APPROACH_CM <= ARENA_CM - m:
+    if m <= ox <= ARENA_CM - m and m <= oy - d <= ARENA_CM - m:
         faces.append('S')
-    if m <= ox + CELL_CM + APPROACH_CM <= ARENA_CM - m and m <= oy <= ARENA_CM - m:
+    if m <= ox + CELL_CM + d <= ARENA_CM - m and m <= oy <= ARENA_CM - m:
         faces.append('E')
-    if m <= ox - APPROACH_CM <= ARENA_CM - m and m <= oy <= ARENA_CM - m:
+    if m <= ox - d <= ARENA_CM - m and m <= oy <= ARENA_CM - m:
         faces.append('W')
     return faces
 
@@ -41,9 +43,9 @@ def generate_random_obstacles(n: int = 5, seed: int | None = None) -> list[Obsta
     Guarantees:
     - No obstacle in the 40×40 cm start zone (bottom-left 4×4 cells).
     - Every approach pose fits in the arena with ≥30 cm boundary clearance.
-    - Obstacles are at least 6 cells apart (Chebyshev distance ≥ 6): each
+    - Obstacles are at least 7 cells apart (Chebyshev distance ≥ 7): each
       obstacle's 50 cm clearance zone (20 cm each side + 10 cm cell) is then
-      separated by ≥10 cm from every neighbour's zone, ensuring the car can
+      separated by ≥20 cm from every neighbour's zone, ensuring the car can
       always navigate between any pair of obstacles.
     """
     rng = _random.Random(seed)
@@ -64,7 +66,7 @@ def generate_random_obstacles(n: int = 5, seed: int | None = None) -> list[Obsta
     for col, row, faces in pool:
         if len(obstacles) == n:
             break
-        if any(max(abs(col - c), abs(row - r)) < 6 for c, r in used):
+        if any(max(abs(col - c), abs(row - r)) < 7 for c, r in used):
             continue
         face = rng.choice(faces)
         used.add((col, row))
@@ -83,15 +85,19 @@ def _angle_diff(from_deg: float, to_deg: float) -> float:
 
 
 def obstacle_approach_pose(obs: Obstacle) -> RobotState:
-    """Grid-aligned approach pose: apex on a grid-line intersection in front of the obstacle face."""
+    """Grid-aligned approach pose. state.x/y tracks the robot's body center, but
+    APPROACH_CM is a camera-to-face distance (the camera is at the front tip,
+    ROBOT_W_CM/2 ahead of center) — so the center stops that extra half-width
+    further back than the camera itself needs to be."""
+    d = APPROACH_CM + ROBOT_W_CM / 2
     if obs.face == 'N':
-        return RobotState(x=obs.x, y=obs.y + CELL_CM + APPROACH_CM, theta=270)
+        return RobotState(x=obs.x, y=obs.y + CELL_CM + d, theta=270)
     if obs.face == 'S':
-        return RobotState(x=obs.x, y=obs.y - APPROACH_CM, theta=90)
+        return RobotState(x=obs.x, y=obs.y - d, theta=90)
     if obs.face == 'E':
-        return RobotState(x=obs.x + CELL_CM + APPROACH_CM, y=obs.y, theta=180)
+        return RobotState(x=obs.x + CELL_CM + d, y=obs.y, theta=180)
     # face == 'W'
-    return RobotState(x=obs.x - APPROACH_CM, y=obs.y, theta=0)
+    return RobotState(x=obs.x - d, y=obs.y, theta=0)
 
 
 def _point_hits_obstacle(x: float, y: float, obstacles: list[Obstacle]) -> bool:

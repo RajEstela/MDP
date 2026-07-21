@@ -30,7 +30,7 @@ DEFAULTS: dict = {
         'deg_per_frame': 3.0,
         'approach_cm': 20,
         'start_x_cm': 25.0,
-        'start_y_cm': 40.0,
+        'start_y_cm': 25.0,
         'start_theta': 90.0,
         'wall_margin_cm': 10.0,
         'scan_seconds': 5.0,

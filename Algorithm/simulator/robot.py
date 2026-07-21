@@ -13,6 +13,8 @@ _ARROW_HALF_PX = 15   # arrow triangle half-height in px
 
 
 def move_forward(state: RobotState, cm: float) -> RobotState:
+    """state.x, state.y is the robot's body center (the real car turns about
+    its center, not its front tip) — FW/BW moves it along the current heading."""
     rad = math.radians(state.theta)
     return RobotState(
         x=state.x + cm * math.cos(rad),
@@ -22,6 +24,9 @@ def move_forward(state: RobotState, cm: float) -> RobotState:
 
 
 def rotate(state: RobotState, deg: float, clockwise: bool) -> RobotState:
+    """In-place turn about the body center: state.x, state.y is unchanged,
+    only heading changes. The front tip sweeps around this fixed center as
+    theta changes — see draw_robot for where that tip actually renders."""
     delta = -deg if clockwise else deg
     return RobotState(x=state.x, y=state.y, theta=(state.theta + delta) % 360)
 
@@ -64,8 +69,8 @@ def draw_robot(surface: "pygame.Surface", state: RobotState) -> None:
     robot_surf = pygame.Surface((size_px, size_px), pygame.SRCALPHA)
     pygame.draw.rect(robot_surf, (30, 100, 200), (0, 0, size_px, size_px))
 
-    # Facing arrow: apex at the right-centre edge (East when theta=0).
-    # state.x, state.y tracks this apex — the front-centre of the robot.
+    # Facing arrow: tip at the right-centre edge (East when theta=0) — this
+    # tip is the robot's front, 15cm ahead of the tracked center point.
     arrow = [
         (size_px, size_px // 2),
         (size_px - _ARROW_INSET_PX, size_px // 2 - _ARROW_HALF_PX),
@@ -77,12 +82,9 @@ def draw_robot(surface: "pygame.Surface", state: RobotState) -> None:
     # pygame's Y-flip means screen-CCW visually matches math-CCW convention.
     rotated = pygame.transform.rotate(robot_surf, state.theta)
 
-    # The surface centre is the geometric centre of the robot body — 15 cm
-    # behind the apex along -theta. Place it there so the apex lands on state.x, state.y.
-    theta_rad = math.radians(state.theta)
-    half_cm = ROBOT_W_CM / 2   # 15 cm
-    cx_cm = state.x - half_cm * math.cos(theta_rad)
-    cy_cm = state.y - half_cm * math.sin(theta_rad)
-    cx_px, cy_px = cm_to_px(cx_cm, cy_cm)
+    # The drawing surface is centered on the robot's body — which state.x,
+    # state.y already tracks directly, so no offset is needed here (unlike a
+    # front-tip-tracked model, where this point would need to be computed).
+    cx_px, cy_px = cm_to_px(state.x, state.y)
     rect = rotated.get_rect(center=(cx_px, cy_px))
     surface.blit(rotated, rect)

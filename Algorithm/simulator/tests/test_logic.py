@@ -302,10 +302,12 @@ def test_dubins_lrl_endpoint():
 
 
 def test_approach_pose_north():
+    # state.x/y is the robot's body center, 15cm (ROBOT_W_CM/2) further back
+    # than the camera itself needs to be, so d = APPROACH_CM + 15 = 35.
     obs = Obstacle(x=50, y=50, face='N')
     pose = obstacle_approach_pose(obs)
     assert abs(pose.x - 50) < 0.01   # grid-aligned: obs.x (left edge)
-    assert abs(pose.y - 80) < 0.01   # obs.y + CELL_CM + APPROACH_CM = 50+10+20
+    assert abs(pose.y - 95) < 0.01   # obs.y + CELL_CM + (APPROACH_CM + 15) = 50+10+35
     assert abs(pose.theta - 270) < 0.01
 
 
@@ -313,14 +315,14 @@ def test_approach_pose_south():
     obs = Obstacle(x=50, y=50, face='S')
     pose = obstacle_approach_pose(obs)
     assert abs(pose.x - 50) < 0.01   # grid-aligned: obs.x
-    assert abs(pose.y - 30) < 0.01   # obs.y - APPROACH_CM = 50-20
+    assert abs(pose.y - 15) < 0.01   # obs.y - (APPROACH_CM + 15) = 50-35
     assert abs(pose.theta - 90) < 0.01
 
 
 def test_approach_pose_east():
     obs = Obstacle(x=50, y=50, face='E')
     pose = obstacle_approach_pose(obs)
-    assert abs(pose.x - 80) < 0.01   # obs.x + CELL_CM + APPROACH_CM = 50+10+20
+    assert abs(pose.x - 95) < 0.01   # obs.x + CELL_CM + (APPROACH_CM + 15) = 50+10+35
     assert abs(pose.y - 50) < 0.01   # grid-aligned: obs.y (bottom edge)
     assert abs(pose.theta - 180) < 0.01
 
@@ -328,7 +330,7 @@ def test_approach_pose_east():
 def test_approach_pose_west():
     obs = Obstacle(x=50, y=50, face='W')
     pose = obstacle_approach_pose(obs)
-    assert abs(pose.x - 30) < 0.01   # obs.x - APPROACH_CM = 50-20
+    assert abs(pose.x - 15) < 0.01   # obs.x - (APPROACH_CM + 15) = 50-35
     assert abs(pose.y - 50) < 0.01   # grid-aligned: obs.y
     assert abs(pose.theta - 0) < 0.01
 
@@ -583,4 +585,5 @@ def test_get_top_n_routes_uses_provided_start():
     obs = [Obstacle(x=150, y=100, face='W')]
     routes = get_top_n_routes(obs, n=1, start=custom_start)
     _, length = routes[0]
-    assert abs(length - 30.0) < 0.01
+    # W-face approach x = obs.x - (APPROACH_CM + ROBOT_W_CM/2) = 150 - 35 = 115
+    assert abs(length - 15.0) < 0.01

@@ -18,13 +18,6 @@ RECONNECT_DELAY_S = 2.0
 
 _DIRECTION_THETA = {'N': 90.0, 'E': 0.0, 'S': 270.0, 'W': 180.0}
 _ROBOT_HALF_WIDTH_CM = 15.0
-# Precomputed offset vectors for each direction to avoid floating point errors
-_DIRECTION_OFFSET = {
-    'N': (0.0, _ROBOT_HALF_WIDTH_CM),
-    'E': (_ROBOT_HALF_WIDTH_CM, 0.0),
-    'S': (0.0, -_ROBOT_HALF_WIDTH_CM),
-    'W': (-_ROBOT_HALF_WIDTH_CM, 0.0),
-}
 
 
 def arena_to_obstacles(snapshot: dict) -> list[Obstacle]:
@@ -65,14 +58,16 @@ def arena_to_obstacles(snapshot: dict) -> list[Obstacle]:
 
 def arena_to_robot_start(snapshot: dict) -> RobotState:
     """Validate an Android arena snapshot's robot field and convert it to
-    the apex pose the simulator tracks.
+    the center pose the simulator tracks (the real car turns about its own
+    center, not its front tip, so that's the point path planning uses).
 
     robot.x/y are 0-indexed grid cells identifying the bottom-left cell of
     the robot's 3x3-cell (30x30cm) footprint — i.e. the arena position of
     the robot's bottom-left wheel edge, per live-hardware calibration (the
     car sat too tight against the wall when that corner was treated as
-    (0,0)). The apex (front-center point) is the footprint center offset by
-    half the robot width along the facing direction.
+    (0,0)). The body center is that footprint's geometric center, the same
+    regardless of facing direction (unlike the front tip, which shifts with
+    heading).
     """
     grid = snapshot.get("grid") or {}
     columns = int(grid.get("columns", 0))
@@ -97,10 +92,7 @@ def arena_to_robot_start(snapshot: dict) -> RobotState:
     center_x = corner_x + _ROBOT_HALF_WIDTH_CM
     center_y = corner_y + _ROBOT_HALF_WIDTH_CM
     theta = _DIRECTION_THETA[direction]
-    offset_x, offset_y = _DIRECTION_OFFSET[direction]
-    apex_x = center_x + offset_x
-    apex_y = center_y + offset_y
-    return RobotState(x=apex_x, y=apex_y, theta=theta)
+    return RobotState(x=center_x, y=center_y, theta=theta)
 
 
 def send_status(sock: socket.socket, revision: int, state: str, message: str, **details) -> None:
