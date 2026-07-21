@@ -153,13 +153,10 @@ class NanoCarLink:
             self.drive(DRIVE_SPEED, offset_angle, segment / cm_per_second)
             self.stop(0.5)
         if remainder > 0:
-            offset = 0
-            if cm <= segment:
-                offset = DURATION_OFFSET_BASE
-            
+            offset = DURATION_OFFSET_BASE
             _cm_per_second = cm_per_second
             _offset_angle = offset_angle
-            if offset_angle != FORWARD_OFFSET_ANGLE:
+            if offset_angle == FORWARD_OFFSET_ANGLE or cm_per_second == CM_PER_SECOND:
                 if remainder == 20:
                     _cm_per_second = 108
                     _offset_angle = 330
@@ -167,8 +164,8 @@ class NanoCarLink:
                     _cm_per_second = 110
                     _offset_angle = 320
 
-            duration = remainder / cm_per_second + offset
-            self.drive(DRIVE_SPEED, offset_angle, duration)
+            duration = remainder / _cm_per_second + offset
+            self.drive(DRIVE_SPEED, _offset_angle, duration)
         self.stop()
 
     def move_backward(self, cm, offset_angle=BACKWARD_OFFSET_ANGLE, cm_per_second=CM_PER_SECOND):
@@ -179,13 +176,10 @@ class NanoCarLink:
             self.drive(-DRIVE_SPEED, offset_angle, segment / cm_per_second)
             self.stop(0.5)
         if remainder > 0:                 
-            offset = 0
-            if remainder >= 10 and cm <= segment:
-                offset = DURATION_OFFSET_BASE
-
+            offset = DURATION_OFFSET_BASE
             _cm_per_second = cm_per_second
             _offset_angle = offset_angle
-            if offset_angle != BACKWARD_OFFSET_ANGLE:
+            if offset_angle == BACKWARD_OFFSET_ANGLE or cm_per_second == CM_PER_SECOND:
                 if remainder == 20:
                     _cm_per_second = 110
                     _offset_angle = -450
@@ -193,8 +187,8 @@ class NanoCarLink:
                     _cm_per_second = 110
                     _offset_angle = -600
 
-            duration = remainder / cm_per_second + offset
-            self.drive(-DRIVE_SPEED, offset_angle, duration)
+            duration = remainder / _cm_per_second + offset
+            self.drive(-DRIVE_SPEED, _offset_angle, duration)
         self.stop()
             
     def rotate_left(self, degrees, rotation_speed=ROTATION_SPEED, step_duration=LEFT_STEP_DURATION):
