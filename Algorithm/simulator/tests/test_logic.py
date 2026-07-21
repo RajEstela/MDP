@@ -2,8 +2,8 @@ import math
 
 from simulator.arena import cm_to_px
 from simulator.dubins import dubins_lrl, dubins_lsl, dubins_lsr, dubins_optimal, dubins_rlr, dubins_rsl, dubins_rsr
-from simulator.config import START_THETA, START_X_CM, START_Y_CM
-from simulator.planner import OBSTACLES, get_commands, get_top_n_routes, generate_random_obstacles, obstacle_approach_pose, _hamiltonian_optimal_order, _angle_diff, _plan_leg, _path_in_bounds
+from simulator.config import APPROACH_CM, CELL_CM, ROBOT_W_CM, START_THETA, START_X_CM, START_Y_CM
+from simulator.planner import OBSTACLES, get_commands, get_top_n_routes, generate_random_obstacles, obstacle_approach_pose, _hamiltonian_optimal_order, _angle_diff, _plan_leg, _path_in_bounds, _grid_leg
 from simulator.robot import arc_step, move_forward, rotate, step_command
 from simulator.types import Command, DubinsPath, Obstacle, RobotState
 
@@ -587,3 +587,150 @@ def test_get_top_n_routes_uses_provided_start():
     _, length = routes[0]
     # W-face approach x = obs.x - (APPROACH_CM + ROBOT_W_CM/2) = 150 - 35 = 115
     assert abs(length - 15.0) < 0.01
+
+
+# ── Regression: reverted 10-40cm approach / footprint margin ────────────────
+#
+# The planner used to grow reverse-facing (BW) legs when the footprint-aware
+# wall margin forced approaching an obstacle "backwards". That mechanism was
+# fully reverted because it made the car visibly reverse before turning.
+# `_grid_leg` no longer has any code path that appends a BW command at all —
+# these tests lock that in as a regression guard across a wide range of
+# scenarios, including the ones that used to trigger it (target behind the
+# robot's current heading, tight corners near the start position).
+
+def test_grid_leg_never_produces_bw():
+    cases = [
+        (RobotState(x=25, y=25, theta=90), RobotState(x=25, y=25, theta=180)),
+        (RobotState(x=25, y=25, theta=90), RobotState(x=100, y=100, theta=0)),
+        (RobotState(x=100, y=100, theta=0), RobotState(x=25, y=25, theta=90)),   # target "behind" start
+        (RobotState(x=100, y=100, theta=90), RobotState(x=100, y=20, theta=270)),  # straight U-turn approach
+        (RobotState(x=180, y=180, theta=270), RobotState(x=20, y=20, theta=90)),
+        (RobotState(x=20, y=180, theta=0), RobotState(x=180, y=20, theta=180)),
+    ]
+    for q1, q2 in cases:
+        for horizontal_first in (True, False):
+            cmds, _ = _grid_leg(q1, q2, horizontal_first=horizontal_first)
+            assert not any(c.kind == 'BW' for c in cmds), (
+                f"_grid_leg produced BW for q1={q1}, q2={q2}, horizontal_first={horizontal_first}"
+            )
+
+
+def test_plan_leg_never_produces_bw():
+    q1 = RobotState(x=25, y=25, theta=90)
+    q2 = RobotState(x=25, y=25, theta=270)  # same point, opposite heading — used to trigger a reverse leg
+    cmds, _ = _plan_leg(q1, q2, obstacles=[])
+    assert not any(c.kind == 'BW' for c in cmds)
+
+
+def test_plan_leg_never_produces_bw_with_detour():
+    # Force the detour branch: obstacle sits directly on both simple L-paths.
+    q1 = RobotState(x=25, y=25, theta=90)
+    q2 = RobotState(x=125, y=125, theta=0)
+    blocking = [Obstacle(x=25, y=125, face='N'), Obstacle(x=125, y=25, face='N')]
+    cmds, _ = _plan_leg(q1, q2, obstacles=blocking)
+    assert not any(c.kind == 'BW' for c in cmds)
+
+
+def test_get_commands_never_produces_bw_default_obstacles():
+    cmds = get_commands(OBSTACLES)
+    assert not any(c.kind == 'BW' for c in cmds)
+
+
+def test_get_commands_never_produces_bw_from_start_facing_away():
+    # Start facing North (START_THETA); target requires immediately heading
+    # South/East from the tight start corner — this combination used to be
+    # exactly what triggered a BW-first route before the revert.
+    start = RobotState(x=START_X_CM, y=START_Y_CM, theta=START_THETA)
+    obstacles = [Obstacle(x=25, y=10, face='S'), Obstacle(x=180, y=25, face='E')]
+    cmds = get_commands(obstacles, start=start)
+    assert not any(c.kind == 'BW' for c in cmds)
+
+
+def test_get_top_n_routes_never_produces_bw():
+    routes = get_top_n_routes(OBSTACLES, n=5)
+    for cmds, _ in routes:
+        assert not any(c.kind == 'BW' for c in cmds)
+
+
+def test_get_commands_never_produces_bw_random_arenas():
+    for seed in range(50):
+        obstacles = generate_random_obstacles(5, seed=seed)
+        cmds = get_commands(obstacles)
+        assert not any(c.kind == 'BW' for c in cmds), f"BW command found for seed={seed}"
+
+
+# ── Obstacle clearance: robot must keep >= 10cm gap from the obstacle face ──
+#
+# state.x/y tracks the robot's body CENTER, so the gap that matters is from
+# the robot's front edge (center + ROBOT_W_CM/2 along heading) to the
+# obstacle's target face, not from the tracked center point itself.
+
+def _front_edge_gap_to_face(state: RobotState, obs: Obstacle) -> float:
+    half = ROBOT_W_CM / 2
+    rad = math.radians(state.theta)
+    front_x = state.x + half * math.cos(rad)
+    front_y = state.y + half * math.sin(rad)
+    if obs.face == 'N':
+        return front_y - (obs.y + CELL_CM)
+    if obs.face == 'S':
+        return obs.y - front_y
+    if obs.face == 'E':
+        return front_x - (obs.x + CELL_CM)
+    # face == 'W'
+    return obs.x - front_x
+
+
+MIN_OBSTACLE_GAP_CM = 10.0
+
+
+def test_approach_pose_gap_at_least_10cm_all_faces():
+    for face in ('N', 'S', 'E', 'W'):
+        obs = Obstacle(x=80, y=80, face=face)
+        pose = obstacle_approach_pose(obs)
+        gap = _front_edge_gap_to_face(pose, obs)
+        assert gap >= MIN_OBSTACLE_GAP_CM, f"face={face}: gap={gap}cm < {MIN_OBSTACLE_GAP_CM}cm"
+
+
+def test_approach_pose_gap_matches_configured_approach_cm():
+    # With the current fixed APPROACH_CM, the front-edge gap should equal
+    # APPROACH_CM exactly (that's the whole point of the +ROBOT_W_CM/2 offset
+    # on the tracked center) — well above the 10cm safety floor.
+    obs = Obstacle(x=80, y=80, face='N')
+    pose = obstacle_approach_pose(obs)
+    gap = _front_edge_gap_to_face(pose, obs)
+    assert abs(gap - APPROACH_CM) < 0.01
+
+
+def test_get_commands_maintains_gap_at_every_obstacle_default():
+    """Simulate the full route; at each WAIT (obstacle reached), verify the
+    robot's front edge is >= 10cm from that obstacle's face."""
+    start = RobotState(x=START_X_CM, y=START_Y_CM, theta=START_THETA)
+    cmds = get_commands(OBSTACLES)
+    obs_by_id = {o.id: o for o in OBSTACLES if o.id is not None}
+    # OBSTACLES may have no ids (local/demo set) — fall back to matching by
+    # nearest approach pose if so.
+    poses_by_obstacle = {id(obstacle_approach_pose(o)): o for o in OBSTACLES}
+
+    state = start
+    checked = 0
+    for cmd in cmds:
+        if cmd.kind == 'WAIT':
+            closest = min(OBSTACLES, key=lambda o: math.hypot(state.x - obstacle_approach_pose(o).x, state.y - obstacle_approach_pose(o).y))
+            gap = _front_edge_gap_to_face(state, closest)
+            assert gap >= MIN_OBSTACLE_GAP_CM, f"gap={gap}cm < {MIN_OBSTACLE_GAP_CM}cm at obstacle {closest}"
+            checked += 1
+            continue
+        remaining = cmd.value
+        while remaining > 0.001:
+            state, remaining = step_command(state, cmd, remaining)
+    assert checked == len(OBSTACLES)
+
+
+def test_random_arenas_obstacle_gap_never_below_10cm():
+    for seed in range(50):
+        obstacles = generate_random_obstacles(5, seed=seed)
+        for obs in obstacles:
+            pose = obstacle_approach_pose(obs)
+            gap = _front_edge_gap_to_face(pose, obs)
+            assert gap >= MIN_OBSTACLE_GAP_CM, f"seed={seed}, obs={obs}: gap={gap}cm"
