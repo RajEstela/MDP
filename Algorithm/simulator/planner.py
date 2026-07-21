@@ -23,16 +23,18 @@ def _valid_faces(col: int, row: int) -> list[str]:
     """Return face directions whose grid-aligned approach pose fits inside the arena with ≥30 cm boundary margin."""
     ox = col * CELL_CM
     oy = row * CELL_CM
+    cx = ox + CELL_CM / 2
+    cy = oy + CELL_CM / 2
     m = 30.0
     d = APPROACH_CM + ROBOT_W_CM / 2  # matches obstacle_approach_pose's actual approach distance
     faces: list[str] = []
-    if m <= ox <= ARENA_CM - m and m <= oy + CELL_CM + d <= ARENA_CM - m:
+    if m <= cx <= ARENA_CM - m and m <= oy + CELL_CM + d <= ARENA_CM - m:
         faces.append('N')
-    if m <= ox <= ARENA_CM - m and m <= oy - d <= ARENA_CM - m:
+    if m <= cx <= ARENA_CM - m and m <= oy - d <= ARENA_CM - m:
         faces.append('S')
-    if m <= ox + CELL_CM + d <= ARENA_CM - m and m <= oy <= ARENA_CM - m:
+    if m <= ox + CELL_CM + d <= ARENA_CM - m and m <= cy <= ARENA_CM - m:
         faces.append('E')
-    if m <= ox - d <= ARENA_CM - m and m <= oy <= ARENA_CM - m:
+    if m <= ox - d <= ARENA_CM - m and m <= cy <= ARENA_CM - m:
         faces.append('W')
     return faces
 
@@ -88,16 +90,23 @@ def obstacle_approach_pose(obs: Obstacle) -> RobotState:
     """Grid-aligned approach pose. state.x/y tracks the robot's body center, but
     APPROACH_CM is a camera-to-face distance (the camera is at the front tip,
     ROBOT_W_CM/2 ahead of center) — so the center stops that extra half-width
-    further back than the camera itself needs to be."""
+    further back than the camera itself needs to be.
+
+    Aligned to the obstacle cell's CENTER along the face-parallel axis (not
+    its low-x/low-y corner) — otherwise a robot already lined up with the
+    obstacle's center gets forced into a pointless sideways jog to reach the
+    corner-aligned approach line."""
     d = APPROACH_CM + ROBOT_W_CM / 2
+    cx = obs.x + CELL_CM / 2
+    cy = obs.y + CELL_CM / 2
     if obs.face == 'N':
-        return RobotState(x=obs.x, y=obs.y + CELL_CM + d, theta=270)
+        return RobotState(x=cx, y=obs.y + CELL_CM + d, theta=270)
     if obs.face == 'S':
-        return RobotState(x=obs.x, y=obs.y - d, theta=90)
+        return RobotState(x=cx, y=obs.y - d, theta=90)
     if obs.face == 'E':
-        return RobotState(x=obs.x + CELL_CM + d, y=obs.y, theta=180)
+        return RobotState(x=obs.x + CELL_CM + d, y=cy, theta=180)
     # face == 'W'
-    return RobotState(x=obs.x - d, y=obs.y, theta=0)
+    return RobotState(x=obs.x - d, y=cy, theta=0)
 
 
 def _point_hits_obstacle(x: float, y: float, obstacles: list[Obstacle]) -> bool:
