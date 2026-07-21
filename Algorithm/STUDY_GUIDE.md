@@ -559,24 +559,32 @@ This computed position is called an **approach pose**.
 def obstacle_approach_pose(obs):
     cx = obs.x + CELL_CM / 2    # center x of the block = left edge + 5 cm
     cy = obs.y + CELL_CM / 2    # center y of the block = bottom edge + 5 cm
-    d  = CELL_CM / 2 + APPROACH_CM  # 5 + 20 = 25 cm from center
+    d  = APPROACH_CM + ROBOT_W_CM / 2  # 20 + 15 = 35 cm from center
 
     if obs.face == 'N':   # picture is on top
         # → robot stands ABOVE the block, faces DOWN toward it
-        return RobotState(x=cx, y=cy + d, theta=270)
+        return RobotState(x=cx, y=obs.y + CELL_CM + d, theta=270)
 
     if obs.face == 'S':   # picture is on bottom
         # → robot stands BELOW the block, faces UP toward it
-        return RobotState(x=cx, y=cy - d, theta=90)
+        return RobotState(x=cx, y=obs.y - d, theta=90)
 
     if obs.face == 'E':   # picture is on right side
         # → robot stands to the RIGHT, faces LEFT toward it
-        return RobotState(x=cx + d, y=cy, theta=180)
+        return RobotState(x=obs.x + CELL_CM + d, y=cy, theta=180)
 
     # face == 'W':         picture is on left side
     # → robot stands to the LEFT, faces RIGHT toward it
-    return RobotState(x=cx - d, y=cy, theta=0)
+    return RobotState(x=obs.x - d, y=cy, theta=0)
 ```
+
+state.x/y tracks the robot's body **center**, not its camera. The camera sits
+`ROBOT_W_CM/2` (15 cm) ahead of center, so `d` includes that extra half-width
+on top of the 20 cm camera-to-face distance — the center stops 35 cm out so
+the camera itself ends up exactly 20 cm from the face. The pose is centered
+on the block along the face-parallel axis (`cx`/`cy`), not its low-x/low-y
+corner — otherwise a robot already lined up with the block's center would be
+forced into a pointless sideways jog just to reach a corner-aligned line.
 
 **The simple rule:**
 - Stand on the **same side as the face** (if face is North, stand North of the block)
@@ -593,23 +601,23 @@ def obstacle_approach_pose(obs):
          │  [obstacle]  │  ← picture is on the TOP face
          └──────────────┘
 
-         d = 25 cm from center of block to center of robot
+         d = 35 cm from center of block to center of robot
 ```
 
 ### Worked examples from the tests
 
 **Obstacle(x=50, y=50, face='N'):**
-- Block center: `cx = 50 + 5 = 55`, `cy = 50 + 5 = 55`
-- Distance: `d = 5 + 20 = 25 cm`
-- Face = North → robot goes above: `y = 55 + 25 = 80`
+- Block center (x-axis only; N/S use the block's actual y edge): `cx = 50 + 5 = 55`
+- Distance: `d = 20 + 15 = 35 cm`
+- Face = North → robot goes above: `y = obs.y + CELL_CM + d = 50 + 10 + 35 = 95`
 - Robot faces South: `theta = 270`
-- **Result: RobotState(x=55, y=80, theta=270)** ✓
+- **Result: RobotState(x=55, y=95, theta=270)** ✓
 
 **Obstacle(x=50, y=50, face='E'):**
-- Block center: `cx=55, cy=55`
-- Face = East → robot goes to the right: `x = 55 + 25 = 80`
+- Block center (y-axis only; E/W use the block's actual x edge): `cy = 50 + 5 = 55`
+- Face = East → robot goes to the right: `x = obs.x + CELL_CM + d = 50 + 10 + 35 = 95`
 - Robot faces West: `theta = 180`
-- **Result: RobotState(x=80, y=55, theta=180)** ✓
+- **Result: RobotState(x=95, y=55, theta=180)** ✓
 
 ### The pattern (memorize this table)
 
