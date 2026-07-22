@@ -373,12 +373,12 @@ def handle_command(raw, source="unknown"):
         BWxxx  - move backward xxx cm       e.g. BW010 = backward 10cm
         RLxxx  - rotate left xxx degrees    e.g. RL090 = rotate left 90 deg
         RRxxx  - rotate right xxx degrees   e.g. RR045 = rotate right 45 deg
-        SCAN,x,id - scan image results for x seconds and return the majority target
-        TFW... - tune move forward          e.g. TFW010/190/98 (cm, offset angle, cm/sec)
-        TBW... - tune move backward         e.g. TBW010/-220/98 (cm, offset angle, cm/sec)
+        TFW... - tune move forward          e.g. TFW010/190/0.301 (cm, offset angle, segment duration)
+        TBW... - tune move backward         e.g. TBW010/-220/0.304 (cm, offset angle, segment duration)
         TRL... - tune rotate left           e.g. TRL090/100/0.455 (degrees, rotation speed, step duration)
         TRR... - tune rotate right          e.g. TRR090/100/0.4751 (degrees, rotation speed, step duration)
         DRIVE,x,z - continuous manual drive; x and z are -1000 to 1000
+        SCAN,x,obstacle ID - scan image results for x seconds and return the majority target ID for the given obstacle ID. 
         STOP   - stop immediately
 
     Returns a JSON string {"id": ..., "status": <int>, "msg": "..."}.

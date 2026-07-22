@@ -13,19 +13,29 @@ FUNCTION = 0x01
 RESERVE = 0x00
 CRC_IGNORE = 0xFF
 
-DRIVE_SPEED = 1000
-ROTATION_SPEED = 100
-FULL_LOCK = 1000
-CM_PER_SECOND = 81.0
-LEFT_STEP_DURATION = 0.4575
-RIGHT_STEP_DURATION = 0.473
-DEGREES_PER_STEP = 15.0
-SEND_INTERVAL = 0.01
-MANUAL_DRIVE_TIMEOUT = 0.5
+SEND_INTERVAL = 0.01        # How often to send packets to the car in seconds (heartbeat interval)
+MANUAL_DRIVE_TIMEOUT = 0.5  # How long to hold a manual drive command before stopping (in seconds)
 
-DURATION_OFFSET_BASE = 0.12
-FORWARD_OFFSET_ANGLE = 260
-BACKWARD_OFFSET_ANGLE = -365
+DRIVE_SPEED = 1000          # SPEED value for forward/backward movement (0-1000)
+ROTATION_SPEED = 100        # SPEED value for rotation (0-1000)
+FULL_LOCK = 1000            # Rotation angle value for full left/right lock (0-1000)
+
+DEGREES_PER_STEP = 15.0     # How many degrees the car rotates in one step (tuned experimentally)
+LEFT_STEP_DURATION = 0.4575 # How long it takes to rotate 15 degrees left at ROTATION_SPEED (tuned experimentally)
+RIGHT_STEP_DURATION = 0.473 # How long it takes to rotate 15 degrees right at ROTATION_SPEED (tuned experimentally)
+
+SEGMENT_DURATION = 0.37     # How long it takes to drive 30cm at DRIVE_SPEED (tuned experimentally)
+FORWARD_OFFSET_ANGLE = 260  # Offset angle for driving straight forward 30cm (tuned experimentally)
+FORWARD_OFFSET_ANGLE_10CM = 320 # Offset angle for driving straight forward 10cm (tuned experimentally)
+FORWARD_OFFSET_ANGLE_20CM = 330 # Offset angle for driving straight forward 20cm (tuned experimentally)
+FORWARD_SEGMENT_DURATION_10CM = 0.210 # Duration for driving straight forward 10cm (tuned experimentally)
+FORWARD_SEGMENT_DURATION_20CM = 0.305 # Duration for driving straight forward 20cm (tuned experimentally)
+
+BACKWARD_OFFSET_ANGLE = -365 # Offset angle for driving straight backward (tuned experimentally)
+BACKWARD_OFFSET_ANGLE_10CM = -600 # Offset angle for driving straight backward 10cm (tuned experimentally)
+BACKWARD_OFFSET_ANGLE_20CM = -450 # Offset angle for driving straight backward 20cm (tuned experimentally)
+BACKWARD_SEGMENT_DURATION_10CM = 0.208 # Duration for driving straight backward 10cm (tuned experimentally)
+BACKWARD_SEGMENT_DURATION_20CM = 0.303 # Duration for driving straight backward 20cm (tuned experimentally)
 
 
 def _packet_value(value):
@@ -145,50 +155,48 @@ class NanoCarLink:
         print("[CONN] Ready.")
 
         
-    def move_forward(self, cm, offset_angle=FORWARD_OFFSET_ANGLE, cm_per_second=CM_PER_SECOND):
+    def move_forward(self, cm, offset_angle=FORWARD_OFFSET_ANGLE, segment_duration=SEGMENT_DURATION):
         segment = 30.0  # drive in 30cm chunks
         full = int(cm / segment)
         remainder = cm % segment
         for i in range(full):
-            self.drive(DRIVE_SPEED, offset_angle, segment / cm_per_second)
+            self.drive(DRIVE_SPEED, offset_angle, segment_duration)
             self.stop(0.5)
         if remainder > 0:
-            offset = DURATION_OFFSET_BASE
-            _cm_per_second = cm_per_second
+            _segment_duration = segment_duration
             _offset_angle = offset_angle
-            if offset_angle == FORWARD_OFFSET_ANGLE or cm_per_second == CM_PER_SECOND:
+            if offset_angle == FORWARD_OFFSET_ANGLE or segment_duration == SEGMENT_DURATION: 
+                # if not overridden from tuning, use special values for 10cm and 20cm
                 if remainder == 20:
-                    _cm_per_second = 108
-                    _offset_angle = 330
+                    _segment_duration = FORWARD_SEGMENT_DURATION_20CM
+                    _offset_angle = FORWARD_OFFSET_ANGLE_20CM
                 elif remainder == 10:
-                    _cm_per_second = 110
-                    _offset_angle = 320
+                    _segment_duration = FORWARD_SEGMENT_DURATION_10CM
+                    _offset_angle = FORWARD_OFFSET_ANGLE_10CM
 
-            duration = remainder / _cm_per_second + offset
-            self.drive(DRIVE_SPEED, _offset_angle, duration)
+            self.drive(DRIVE_SPEED, _offset_angle, _segment_duration)
         self.stop()
 
-    def move_backward(self, cm, offset_angle=BACKWARD_OFFSET_ANGLE, cm_per_second=CM_PER_SECOND):
+    def move_backward(self, cm, offset_angle=BACKWARD_OFFSET_ANGLE, segment_duration=SEGMENT_DURATION):
         segment = 30.0  # drive in 30cm chunks
         full = int(cm / segment)
         remainder = cm % segment
         for i in range(full):
-            self.drive(-DRIVE_SPEED, offset_angle, segment / cm_per_second)
+            self.drive(-DRIVE_SPEED, offset_angle, segment_duration)
             self.stop(0.5)
         if remainder > 0:                 
-            offset = DURATION_OFFSET_BASE
-            _cm_per_second = cm_per_second
+            _segment_duration = segment_duration
             _offset_angle = offset_angle
-            if offset_angle == BACKWARD_OFFSET_ANGLE or cm_per_second == CM_PER_SECOND:
+            if offset_angle == BACKWARD_OFFSET_ANGLE or segment_duration == SEGMENT_DURATION:
+                # if not overridden from tuning, use special values for 10cm and 20cm
                 if remainder == 20:
-                    _cm_per_second = 110
-                    _offset_angle = -450
+                    _segment_duration = BACKWARD_SEGMENT_DURATION_20CM
+                    _offset_angle = BACKWARD_OFFSET_ANGLE_20CM
                 elif remainder == 10:
-                    _cm_per_second = 110
-                    _offset_angle = -600
+                    _segment_duration = BACKWARD_SEGMENT_DURATION_10CM
+                    _offset_angle = BACKWARD_OFFSET_ANGLE_10CM
 
-            duration = remainder / _cm_per_second + offset
-            self.drive(-DRIVE_SPEED, _offset_angle, duration)
+            self.drive(-DRIVE_SPEED, _offset_angle, _segment_duration)
         self.stop()
             
     def rotate_left(self, degrees, rotation_speed=ROTATION_SPEED, step_duration=LEFT_STEP_DURATION):
@@ -241,7 +249,6 @@ class NanoCarLink:
 
 def main():
     print("[MAIN] Starting NanoCar link")
-    print("[MAIN] Config: DRIVE_SPEED=" + str(DRIVE_SPEED) + " CM_PER_SECOND=" + str(CM_PER_SECOND) + " OFFSET_BASE=" + str(DURATION_OFFSET_BASE))
     car = NanoCarLink()
     car.connect()
 
