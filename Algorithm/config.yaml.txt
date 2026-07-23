@@ -1,0 +1,32 @@
+# MDP simulator & car-link configuration.
+# Edit values below and re-run the .exe — no rebuild needed.
+
+rpi:
+  host: 192.168.3.3   # RPi IP on the car's WiFi AP — changes per demo network
+  port: 5000
+  timeout_s: 60.0      # large rotations (e.g. 360 deg) can take ~24s
+
+simulator:
+  cell_cm: 10
+  grid_size: 20
+  cell_px: 40
+  arena_px: 800
+  fps: 60
+  turn_radius_cm: 25.0
+  robot_w_cm: 30
+  robot_h_cm: 30
+  step_cm_per_frame: 2.0
+  deg_per_frame: 3.0
+  approach_cm: 20
+  start_x_cm: 25.0        # robot's body CENTER (the car turns about its center, not its front tip)
+  start_y_cm: 25.0
+  start_theta: 90.0
+  wall_margin_cm: 10.0   # keep this far from the outer walls when planning (ground ruler at the perimeter)
+  scan_seconds: 5.0      # how long the RPi samples camera detections for on each SCAN command
+
+default_obstacles:
+  - {x: 50,  y: 100, face: N}
+  - {x: 110, y: 100, face: E}
+  - {x: 50,  y: 160, face: S}
+  - {x: 110, y: 160, face: W}
+  - {x: 170, y: 60,  face: N}
