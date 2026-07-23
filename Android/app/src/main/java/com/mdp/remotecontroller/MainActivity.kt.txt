@@ -1,0 +1,22 @@
+package com.mdp.remotecontroller
+
+import android.os.Bundle
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.setContent
+import androidx.activity.viewModels
+import com.mdp.remotecontroller.ui.MdpControllerApp
+import com.mdp.remotecontroller.ui.MdpControllerViewModel
+import com.mdp.remotecontroller.ui.theme.MdpTheme
+
+class MainActivity : ComponentActivity() {
+    private val viewModel: MdpControllerViewModel by viewModels()
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        setContent {
+            MdpTheme {
+                MdpControllerApp(viewModel = viewModel)
+            }
+        }
+    }
+}

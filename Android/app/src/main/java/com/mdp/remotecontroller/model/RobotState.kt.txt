@@ -1,0 +1,10 @@
+package com.mdp.remotecontroller.model
+
+data class RobotState(
+    val position: GridPosition = GridPosition(x = 1, y = 1),
+    val direction: Direction = Direction.N,
+) {
+    companion object {
+        const val FOOTPRINT_CELLS = 3
+    }
+}

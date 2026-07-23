@@ -1,0 +1,6 @@
+package com.mdp.remotecontroller.model
+
+data class GridPosition(
+    val x: Int,
+    val y: Int,
+)

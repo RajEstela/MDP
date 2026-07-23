@@ -1,0 +1,19 @@
+package com.mdp.remotecontroller.model
+
+data class ArenaState(
+    val columns: Int = 20,
+    val rows: Int = 20,
+    val robot: RobotState = RobotState(),
+    val obstacles: List<Obstacle> = emptyList(),
+) {
+    fun contains(position: GridPosition): Boolean =
+        position.x in 0 until columns && position.y in 0 until rows
+
+    fun containsRobot(robot: RobotState): Boolean {
+        val halfFootprint = RobotState.FOOTPRINT_CELLS / 2
+        return robot.position.x - halfFootprint >= 0 &&
+            robot.position.y - halfFootprint >= 0 &&
+            robot.position.x + halfFootprint < columns &&
+            robot.position.y + halfFootprint < rows
+    }
+}

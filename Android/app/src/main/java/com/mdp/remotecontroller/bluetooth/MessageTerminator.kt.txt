@@ -1,0 +1,6 @@
+package com.mdp.remotecontroller.bluetooth
+
+enum class MessageTerminator(val suffix: String, val label: String) {
+    None("", "None"),
+    NewLine("\n", "LF"),
+}

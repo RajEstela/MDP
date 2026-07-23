@@ -1,0 +1,36 @@
+package com.mdp.remotecontroller.robot
+
+import com.mdp.remotecontroller.model.Direction
+import com.mdp.remotecontroller.model.GridPosition
+import com.mdp.remotecontroller.model.Obstacle
+import com.mdp.remotecontroller.model.ArenaState
+
+sealed interface RobotCommand {
+    data class AddObstacle(val obstacle: Obstacle) : RobotCommand
+    data class RemoveObstacle(val obstacleId: String) : RobotCommand
+    data class FaceObstacle(val obstacleId: String, val direction: Direction) : RobotCommand
+    data class TargetObstacle(
+        val obstacleId: String,
+        val targetId: Int,
+        val direction: Direction,
+    ) : RobotCommand
+
+    data class SetObstacleTarget(
+        val obstacleId: String,
+        val targetId: Int,
+    ) : RobotCommand
+
+    data class MoveRobot(val action: MovementAction) : RobotCommand
+    data class AnalogDrive(
+        val speed: Int,
+        val steering: Int,
+    ) : RobotCommand
+
+    data class SendArena(
+        val arena: ArenaState,
+        val revision: Long,
+    ) : RobotCommand
+
+    data class SetRobotPose(val position: GridPosition, val direction: Direction) : RobotCommand
+    data class Raw(val text: String) : RobotCommand
+}

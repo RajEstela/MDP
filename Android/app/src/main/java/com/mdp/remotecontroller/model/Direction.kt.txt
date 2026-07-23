@@ -1,0 +1,19 @@
+package com.mdp.remotecontroller.model
+
+enum class Direction {
+    N, E, S, W;
+
+    fun turnLeft(): Direction = when (this) {
+        N -> W
+        W -> S
+        S -> E
+        E -> N
+    }
+
+    fun turnRight(): Direction = when (this) {
+        N -> E
+        E -> S
+        S -> W
+        W -> N
+    }
+}

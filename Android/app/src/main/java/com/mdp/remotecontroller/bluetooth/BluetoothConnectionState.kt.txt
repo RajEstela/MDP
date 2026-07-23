@@ -1,0 +1,17 @@
+package com.mdp.remotecontroller.bluetooth
+
+import com.mdp.remotecontroller.model.BluetoothDeviceInfo
+
+data class BluetoothConnectionState(
+    val pairedDevices: List<BluetoothDeviceInfo> = emptyList(),
+    val availableDevices: List<BluetoothDeviceInfo> = emptyList(),
+    val connectedDevice: BluetoothDeviceInfo? = null,
+    val isConnecting: Boolean = false,
+    val isAutoReconnecting: Boolean = false,
+    val isDiscovering: Boolean = false,
+    val error: String? = null,
+    val receivedMessages: List<String> = emptyList(),
+    val receivedMessageCount: Long = 0,
+) {
+    val isConnected: Boolean = connectedDevice != null
+}

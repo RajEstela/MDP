@@ -1,0 +1,819 @@
+package com.mdp.remotecontroller.ui
+
+import android.Manifest
+import android.content.Intent
+import android.os.Build
+import android.provider.Settings
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Bluetooth
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.LockOpen
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Send
+import androidx.compose.material.icons.filled.Upload
+import androidx.compose.material3.Button
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Divider
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.ScrollableTabRow
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Tab
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBar
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.unit.dp
+import com.mdp.remotecontroller.bluetooth.BluetoothSerialService
+import com.mdp.remotecontroller.map.ArenaGrid
+import com.mdp.remotecontroller.model.BluetoothDeviceInfo
+import com.mdp.remotecontroller.model.Direction
+import com.mdp.remotecontroller.model.GridPosition
+import com.mdp.remotecontroller.robot.RobotCommand
+import com.mdp.remotecontroller.robot.RobotController
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlin.math.abs
+import kotlin.math.roundToInt
+
+private enum class ControllerTab(val title: String) {
+    Bluetooth("Bluetooth"),
+    Arena("Arena"),
+    Manual("Manual driving"),
+    Commands("Commands"),
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun MdpControllerApp(viewModel: MdpControllerViewModel) {
+    val context = LocalContext.current.applicationContext
+    val scope = rememberCoroutineScope()
+    val bluetooth = remember { BluetoothSerialService(context, scope) }
+    val robotController = remember { RobotController(bluetooth) }
+    val bluetoothState by bluetooth.state.collectAsState()
+    var consumedIncomingCount by remember { mutableStateOf(0L) }
+    var selectedTab by remember { mutableStateOf(ControllerTab.Bluetooth) }
+
+    val permissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestMultiplePermissions(),
+        onResult = { bluetooth.startDeviceScan() },
+    )
+
+    LaunchedEffect(Unit) {
+        val permissions = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            arrayOf(
+                Manifest.permission.BLUETOOTH_CONNECT,
+                Manifest.permission.BLUETOOTH_SCAN,
+                Manifest.permission.ACCESS_FINE_LOCATION,
+            )
+        } else {
+            arrayOf(Manifest.permission.ACCESS_FINE_LOCATION)
+        }
+        permissionLauncher.launch(permissions)
+    }
+
+    DisposableEffect(Unit) {
+        onDispose { bluetooth.close() }
+    }
+
+    LaunchedEffect(bluetoothState.receivedMessageCount) {
+        val newMessageCount = (bluetoothState.receivedMessageCount - consumedIncomingCount)
+            .coerceAtLeast(0)
+            .coerceAtMost(bluetoothState.receivedMessages.size.toLong())
+            .toInt()
+        bluetoothState.receivedMessages.takeLast(newMessageCount).forEach(viewModel::applyIncoming)
+        consumedIncomingCount = bluetoothState.receivedMessageCount
+    }
+
+    fun send(command: RobotCommand) {
+        scope.launch {
+            robotController.send(command)
+            viewModel.recordSent(command)
+        }
+    }
+
+    Scaffold(
+        topBar = {
+            TopAppBar(title = { Text("MDP Remote Controller") })
+        },
+    ) { padding ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding),
+        ) {
+            ScrollableTabRow(selectedTabIndex = selectedTab.ordinal) {
+                ControllerTab.entries.forEach { tab ->
+                    Tab(
+                        selected = selectedTab == tab,
+                        onClick = { selectedTab = tab },
+                        text = { Text(tab.title) },
+                    )
+                }
+            }
+
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .verticalScroll(rememberScrollState())
+                    .padding(12.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                when (selectedTab) {
+                    ControllerTab.Bluetooth -> BluetoothPanel(
+                        devices = bluetoothState.availableDevices,
+                        connectedAddress = bluetoothState.connectedDevice?.address,
+                isConnecting = bluetoothState.isConnecting,
+                isAutoReconnecting = bluetoothState.isAutoReconnecting,
+                isDiscovering = bluetoothState.isDiscovering,
+                        error = bluetoothState.error,
+                        onRefresh = bluetooth::startDeviceScan,
+                        onConnect = { address -> scope.launch { bluetooth.connect(address) } },
+                        onDisconnect = bluetooth::disconnect,
+                        onOpenSettings = {
+                            context.startActivity(
+                                Intent(Settings.ACTION_BLUETOOTH_SETTINGS)
+                                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                            )
+                        },
+                    )
+
+                    ControllerTab.Arena -> {
+                        ArenaGrid(
+                            arena = viewModel.arena,
+                            onObstacleAdded = viewModel::addObstacle,
+                            onObstacleMoved = { id, position ->
+                                viewModel.moveObstacle(id, position)
+                            },
+                            onObstacleRemoved = { id -> send(viewModel.removeObstacle(id)) },
+                        )
+                        RobotPosePanel(
+                            x = viewModel.arena.robot.position.x,
+                            y = viewModel.arena.robot.position.y,
+                            direction = viewModel.arena.robot.direction,
+                        )
+                        ObstaclePanel(
+                            viewModel = viewModel,
+                            onCommand = ::send,
+                        )
+                        Button(
+                            modifier = Modifier.fillMaxWidth(),
+                            enabled = bluetoothState.isConnected,
+                            onClick = { send(viewModel.buildArenaSnapshotCommand()) },
+                        ) {
+                            Icon(Icons.Default.Upload, contentDescription = null)
+                            Text("Send Arena to Algorithm")
+                        }
+                    }
+
+                    ControllerTab.Manual -> {
+                        ImageRecognitionObstaclePanel(
+                            obstacleIds = viewModel.arena.obstacles.map { it.id },
+                            selectedId = viewModel.recognitionObstacleId,
+                            locked = viewModel.recognitionObstacleLocked,
+                            bluetoothConnected = bluetoothState.isConnected,
+                            onSelect = viewModel::selectRecognitionObstacle,
+                            onLock = {
+                                viewModel.lockRecognitionObstacle()?.let(::send)
+                            },
+                            onUnlock = { send(viewModel.unlockRecognitionObstacle()) },
+                        )
+                        MovementControls(
+                            enabled = bluetoothState.isConnected,
+                            onDrive = { speed, steering ->
+                                send(viewModel.buildAnalogDriveCommand(speed, steering))
+                            },
+                            onStop = { send(RobotCommand.Raw("STOP")) },
+                        )
+                    }
+
+                    ControllerTab.Commands -> {
+                        NanoFeedbackPanel(feedback = viewModel.nanoFeedback)
+                        RawCommandPanel(
+                            value = viewModel.rawCommand,
+                            log = viewModel.commandLog,
+                            onValueChange = viewModel::updateRawCommand,
+                            onSend = { viewModel.rawCommandOrNull()?.let(::send) },
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun BluetoothPanel(
+    devices: List<BluetoothDeviceInfo>,
+    connectedAddress: String?,
+    isConnecting: Boolean,
+    isAutoReconnecting: Boolean,
+    isDiscovering: Boolean,
+    error: String?,
+    onRefresh: () -> Unit,
+    onConnect: (String) -> Unit,
+    onDisconnect: () -> Unit,
+    onOpenSettings: () -> Unit,
+) {
+    var panelExpanded by remember { mutableStateOf(true) }
+    val statusText = when {
+        connectedAddress != null -> "Connected"
+        isAutoReconnecting -> "Reconnecting"
+        isConnecting -> "Connecting"
+        isDiscovering -> "Scanning"
+        else -> "Disconnected"
+    }
+
+    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
+        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text("Bluetooth Serial", style = MaterialTheme.typography.titleMedium)
+                    Text(statusText, style = MaterialTheme.typography.bodySmall)
+                }
+                Row {
+                    if (connectedAddress != null) {
+                        TextButton(onClick = onDisconnect) { Text("Disconnect") }
+                    }
+                    IconButton(onClick = { panelExpanded = !panelExpanded }) {
+                        Icon(
+                            imageVector = if (panelExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                            contentDescription = if (panelExpanded) "Hide Bluetooth panel" else "Show Bluetooth panel",
+                        )
+                    }
+                }
+            }
+
+            if (!panelExpanded) {
+                error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+                return@Column
+            }
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.End,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                TextButton(onClick = onOpenSettings) { Text("Settings") }
+                IconButton(onClick = onRefresh) {
+                    Icon(Icons.Default.Refresh, contentDescription = "Scan for Bluetooth devices")
+                }
+            }
+
+            Text(
+                text = if (isDiscovering) "Scanning for available devices..." else "Available devices",
+                style = MaterialTheme.typography.bodyMedium,
+            )
+
+            devices.forEach { device ->
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text(device.name, style = MaterialTheme.typography.bodyLarge)
+                        Text(device.address, style = MaterialTheme.typography.bodySmall)
+                    }
+                    Button(
+                        enabled = !isConnecting && connectedAddress != device.address,
+                        onClick = { onConnect(device.address) },
+                    ) {
+                        Icon(Icons.Default.Bluetooth, contentDescription = null)
+                        Text(if (connectedAddress == device.address) "Connected" else "Connect")
+                    }
+                }
+            }
+
+            if (devices.isEmpty()) {
+                Text("No available devices found", style = MaterialTheme.typography.bodyMedium)
+            }
+            error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+        }
+    }
+}
+
+@Composable
+private fun RobotPosePanel(
+    x: Int,
+    y: Int,
+    direction: Direction,
+) {
+    Card {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(12.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text("Robot Pose", style = MaterialTheme.typography.titleMedium)
+            Text(
+                text = "($x,$y) $direction",
+                style = MaterialTheme.typography.titleMedium,
+            )
+        }
+    }
+}
+
+@Composable
+private fun ObstaclePanel(
+    viewModel: MdpControllerViewModel,
+    onCommand: (RobotCommand) -> Unit,
+) {
+    Card {
+        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text("Obstacles", style = MaterialTheme.typography.titleMedium)
+                Button(onClick = viewModel::resetArena) {
+                    Icon(Icons.Default.Refresh, contentDescription = null)
+                    Text("Reset")
+                }
+            }
+            viewModel.arena.obstacles.forEach { obstacle ->
+                ObstacleEditorRow(
+                    obstacleId = obstacle.id,
+                    targetId = obstacle.targetId,
+                    x = obstacle.position.x,
+                    y = obstacle.position.y,
+                    direction = obstacle.facing,
+                    maxX = viewModel.arena.columns - 1,
+                    maxY = viewModel.arena.rows - 1,
+                    onConfirm = { position, direction ->
+                        viewModel.confirmObstacle(obstacle.id, position, direction).forEach(onCommand)
+                    },
+                    onRemove = { onCommand(viewModel.removeObstacle(obstacle.id)) },
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun ObstacleEditorRow(
+    obstacleId: String,
+    targetId: Int?,
+    x: Int,
+    y: Int,
+    direction: Direction,
+    maxX: Int,
+    maxY: Int,
+    onConfirm: (GridPosition, Direction) -> Unit,
+    onRemove: () -> Unit,
+) {
+    var xText by remember(obstacleId) { mutableStateOf(x.toString()) }
+    var yText by remember(obstacleId) { mutableStateOf(y.toString()) }
+    var selectedDirection by remember(obstacleId) { mutableStateOf(direction) }
+
+    LaunchedEffect(x, y, direction) {
+        xText = x.toString()
+        yText = y.toString()
+        selectedDirection = direction
+    }
+
+    val parsedX = xText.toIntOrNull()
+    val parsedY = yText.toIntOrNull()
+    val isValid = parsedX in 0..maxX && parsedY in 0..maxY
+
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = if (targetId == null) obstacleId else "$obstacleId -> $targetId",
+                modifier = Modifier.weight(1f),
+                style = MaterialTheme.typography.titleSmall,
+            )
+            OutlinedTextField(
+                value = xText,
+                onValueChange = { xText = it.filter(Char::isDigit).take(2) },
+                modifier = Modifier.width(72.dp),
+                singleLine = true,
+                label = { Text("X") },
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+            )
+            OutlinedTextField(
+                value = yText,
+                onValueChange = { yText = it.filter(Char::isDigit).take(2) },
+                modifier = Modifier.width(72.dp),
+                singleLine = true,
+                label = { Text("Y") },
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+            )
+            Button(
+                enabled = isValid,
+                onClick = { onConfirm(GridPosition(parsedX ?: x, parsedY ?: y), selectedDirection) },
+            ) {
+                Text("Confirm")
+            }
+            IconButton(onClick = onRemove) {
+                Icon(Icons.Default.Delete, contentDescription = "Remove $obstacleId")
+            }
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            Direction.entries.forEach { direction ->
+                TextButton(
+                    enabled = selectedDirection != direction,
+                    onClick = { selectedDirection = direction },
+                ) {
+                    Text(direction.name)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ImageRecognitionObstaclePanel(
+    obstacleIds: List<String>,
+    selectedId: String?,
+    locked: Boolean,
+    bluetoothConnected: Boolean,
+    onSelect: (String) -> Unit,
+    onLock: () -> Unit,
+    onUnlock: () -> Unit,
+) {
+    Card {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text("Image Recognition Obstacle", style = MaterialTheme.typography.titleMedium)
+            Text(
+                if (locked) {
+                    "$selectedId is locked. Recognition results will update only this obstacle."
+                } else {
+                    "Select an obstacle, then lock it before image recognition."
+                },
+                style = MaterialTheme.typography.bodySmall,
+            )
+
+            if (obstacleIds.isEmpty()) {
+                Text("Add obstacles in the Arena tab first.")
+            } else {
+                obstacleIds.forEach { obstacleId ->
+                    if (selectedId == obstacleId) {
+                        Button(
+                            modifier = Modifier.fillMaxWidth(),
+                            enabled = !locked,
+                            onClick = { onSelect(obstacleId) },
+                        ) {
+                            Text("$obstacleId selected")
+                        }
+                    } else {
+                        TextButton(
+                            modifier = Modifier.fillMaxWidth(),
+                            enabled = !locked,
+                            onClick = { onSelect(obstacleId) },
+                        ) {
+                            Text(obstacleId)
+                        }
+                    }
+                }
+            }
+
+            Button(
+                modifier = Modifier.fillMaxWidth(),
+                enabled = bluetoothConnected && selectedId != null,
+                onClick = if (locked) onUnlock else onLock,
+            ) {
+                Icon(
+                    imageVector = if (locked) Icons.Default.LockOpen else Icons.Default.Lock,
+                    contentDescription = null,
+                )
+                Text(if (locked) "Unlock $selectedId" else "Lock selected obstacle")
+            }
+
+            if (!bluetoothConnected) {
+                Text("Connect Bluetooth to lock the selection", color = MaterialTheme.colorScheme.error)
+            }
+        }
+    }
+}
+
+
+@Composable
+private fun MovementControls(
+    enabled: Boolean,
+    onDrive: (speed: Int, steering: Int) -> Unit,
+    onStop: () -> Unit,
+) {
+    var speed by remember { mutableIntStateOf(0) }
+    var steering by remember { mutableIntStateOf(0) }
+
+    LaunchedEffect(enabled) {
+        if (!enabled) {
+            speed = 0
+            steering = 0
+        }
+    }
+
+    LaunchedEffect(speed, steering, enabled) {
+        if (!enabled) return@LaunchedEffect
+
+        do {
+            onDrive(speed, steering)
+            if (speed == 0 && steering == 0) break
+            delay(100)
+        } while (true)
+    }
+
+    DisposableEffect(Unit) {
+        onDispose { onDrive(0, 0) }
+    }
+
+    Card {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(12.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Text("Manual Driving", style = MaterialTheme.typography.titleMedium)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(16.dp),
+            ) {
+                AnalogAxisControl(
+                    modifier = Modifier.weight(1f),
+                    title = "Throttle",
+                    value = speed,
+                    axis = AnalogAxis.Vertical,
+                    startLabel = "Forward",
+                    endLabel = "Reverse",
+                    enabled = enabled,
+                    onValueChange = { speed = it },
+                )
+                AnalogAxisControl(
+                    modifier = Modifier.weight(1f),
+                    title = "Steering",
+                    value = steering,
+                    axis = AnalogAxis.Horizontal,
+                    startLabel = "Left",
+                    endLabel = "Right",
+                    enabled = enabled,
+                    onValueChange = { steering = it },
+                )
+            }
+            Button(
+                enabled = enabled,
+                onClick = {
+                    speed = 0
+                    steering = 0
+                    onStop()
+                },
+            ) {
+                Text("Stop")
+            }
+            if (!enabled) {
+                Text("Bluetooth disconnected", color = MaterialTheme.colorScheme.error)
+            }
+        }
+    }
+}
+
+private enum class AnalogAxis {
+    Vertical,
+    Horizontal,
+}
+
+@Composable
+private fun AnalogAxisControl(
+    title: String,
+    value: Int,
+    axis: AnalogAxis,
+    startLabel: String,
+    endLabel: String,
+    enabled: Boolean,
+    onValueChange: (Int) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val trackColor = MaterialTheme.colorScheme.outlineVariant
+    val activeColor = if (enabled) {
+        MaterialTheme.colorScheme.primary
+    } else {
+        MaterialTheme.colorScheme.onSurface.copy(alpha = 0.25f)
+    }
+    val thumbColor = if (enabled) {
+        MaterialTheme.colorScheme.primaryContainer
+    } else {
+        MaterialTheme.colorScheme.surfaceVariant
+    }
+    val centerColor = MaterialTheme.colorScheme.onSurfaceVariant
+
+    Column(
+        modifier = modifier,
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Text(title, style = MaterialTheme.typography.titleSmall)
+        Text(
+            text = analogValueLabel(value, startLabel, endLabel),
+            style = MaterialTheme.typography.labelMedium,
+        )
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(220.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            Canvas(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .pointerInput(axis, enabled) {
+                        if (!enabled) return@pointerInput
+
+                        fun updateValue(position: Offset) {
+                            val center = Offset(size.width / 2f, size.height / 2f)
+                            val travel = when (axis) {
+                                AnalogAxis.Vertical -> size.height / 2f - 32.dp.toPx()
+                                AnalogAxis.Horizontal -> size.width / 2f - 24.dp.toPx()
+                            }.coerceAtLeast(1f)
+                            val normalized = when (axis) {
+                                AnalogAxis.Vertical -> (center.y - position.y) / travel
+                                AnalogAxis.Horizontal -> (center.x - position.x) / travel
+                            }.coerceIn(-1f, 1f)
+                            val outsideDeadZone = if (abs(normalized) < 0.08f) 0f else normalized
+                            val commandValue = ((outsideDeadZone * 1000f) / 50f).roundToInt() * 50
+                            onValueChange(commandValue.coerceIn(-1000, 1000))
+                        }
+
+                        detectDragGestures(
+                            onDragStart = ::updateValue,
+                            onDragCancel = { onValueChange(0) },
+                            onDragEnd = { onValueChange(0) },
+                            onDrag = { change, _ ->
+                                change.consume()
+                                updateValue(change.position)
+                            },
+                        )
+                    },
+            ) {
+                val center = Offset(size.width / 2f, size.height / 2f)
+                val margin = if (axis == AnalogAxis.Vertical) 32.dp.toPx() else 24.dp.toPx()
+                val travel = when (axis) {
+                    AnalogAxis.Vertical -> size.height / 2f - margin
+                    AnalogAxis.Horizontal -> size.width / 2f - margin
+                }.coerceAtLeast(1f)
+                val start = when (axis) {
+                    AnalogAxis.Vertical -> Offset(center.x, margin)
+                    AnalogAxis.Horizontal -> Offset(margin, center.y)
+                }
+                val end = when (axis) {
+                    AnalogAxis.Vertical -> Offset(center.x, size.height - margin)
+                    AnalogAxis.Horizontal -> Offset(size.width - margin, center.y)
+                }
+                val thumb = when (axis) {
+                    AnalogAxis.Vertical -> Offset(center.x, center.y - value / 1000f * travel)
+                    AnalogAxis.Horizontal -> Offset(center.x - value / 1000f * travel, center.y)
+                }
+
+                drawLine(trackColor, start, end, strokeWidth = 12.dp.toPx(), cap = StrokeCap.Round)
+                drawLine(activeColor, center, thumb, strokeWidth = 12.dp.toPx(), cap = StrokeCap.Round)
+                drawCircle(centerColor, radius = 4.dp.toPx(), center = center)
+                drawCircle(thumbColor, radius = 25.dp.toPx(), center = thumb)
+                drawCircle(
+                    activeColor,
+                    radius = 25.dp.toPx(),
+                    center = thumb,
+                    style = androidx.compose.ui.graphics.drawscope.Stroke(width = 3.dp.toPx()),
+                )
+            }
+        }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            Text(startLabel, style = MaterialTheme.typography.labelSmall)
+            Text(endLabel, style = MaterialTheme.typography.labelSmall)
+        }
+    }
+}
+
+private fun analogValueLabel(value: Int, positiveLabel: String, negativeLabel: String): String {
+    val percent = abs(value) / 10
+    return when {
+        value > 0 -> "$positiveLabel $percent%"
+        value < 0 -> "$negativeLabel $percent%"
+        else -> "Centered"
+    }
+}
+
+@Composable
+private fun NanoFeedbackPanel(feedback: List<String>) {
+    Card {
+        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("Nanocar Location Update", style = MaterialTheme.typography.titleMedium)
+            if (feedback.isEmpty()) {
+                Text("Waiting for algorithm movement", style = MaterialTheme.typography.bodyMedium)
+            } else {
+                LazyColumn(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 120.dp),
+                    reverseLayout = true,
+                ) {
+                    items(feedback.reversed()) { line ->
+                        Text(line, style = MaterialTheme.typography.bodyMedium)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun RawCommandPanel(
+    value: String,
+    log: List<String>,
+    onValueChange: (String) -> Unit,
+    onSend: () -> Unit,
+) {
+    Card {
+        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("Commands", style = MaterialTheme.typography.titleMedium)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(
+                    value = value,
+                    onValueChange = onValueChange,
+                    modifier = Modifier.weight(1f),
+                    singleLine = true,
+                    placeholder = { Text("ADD,B1,(10,6)") },
+                )
+                IconButton(onClick = onSend) {
+                    Icon(Icons.Default.Send, contentDescription = "Send command")
+                }
+            }
+            Divider()
+            LazyColumn(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 180.dp),
+                reverseLayout = true,
+            ) {
+                items(log.reversed()) { line ->
+                    Text(line, style = MaterialTheme.typography.bodySmall)
+                }
+            }
+        }
+    }
+}

@@ -1,0 +1,220 @@
+package com.mdp.remotecontroller.ui
+
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.lifecycle.ViewModel
+import com.mdp.remotecontroller.commandparser.CommandFormatter
+import com.mdp.remotecontroller.commandparser.CommandParser
+import com.mdp.remotecontroller.model.ArenaState
+import com.mdp.remotecontroller.model.Direction
+import com.mdp.remotecontroller.model.GridPosition
+import com.mdp.remotecontroller.model.Obstacle
+import com.mdp.remotecontroller.model.RobotState
+import com.mdp.remotecontroller.robot.MovementAction
+import com.mdp.remotecontroller.robot.RobotCommand
+
+class MdpControllerViewModel : ViewModel() {
+    private val formatter = CommandFormatter()
+    private val parser = CommandParser()
+
+    var arena by mutableStateOf(ArenaState())
+        private set
+
+    var rawCommand by mutableStateOf("")
+        private set
+
+    var commandLog by mutableStateOf<List<String>>(emptyList())
+        private set
+
+    var nanoFeedback by mutableStateOf<List<String>>(emptyList())
+        private set
+
+    var recognitionObstacleId by mutableStateOf<String?>(null)
+        private set
+
+    var recognitionObstacleLocked by mutableStateOf(false)
+        private set
+
+    private var nextObstacleNumber = 1
+    private var arenaRevision = 0L
+
+    fun updateRawCommand(value: String) {
+        rawCommand = value
+    }
+
+    fun resetArena() {
+        arena = ArenaState()
+        nextObstacleNumber = 1
+        recognitionObstacleId = null
+        recognitionObstacleLocked = false
+    }
+
+    fun buildMovementCommand(action: MovementAction): RobotCommand {
+        arena = arena.copy(robot = moveRobotLocally(action))
+        return RobotCommand.Raw(action.wireValue)
+    }
+
+    fun buildAnalogDriveCommand(speed: Int, steering: Int): RobotCommand {
+        return RobotCommand.AnalogDrive(
+            speed = speed.coerceIn(-1000, 1000),
+            steering = steering.coerceIn(-1000, 1000),
+        )
+    }
+
+    fun buildArenaSnapshotCommand(): RobotCommand {
+        arenaRevision += 1
+        return RobotCommand.SendArena(arena = arena, revision = arenaRevision)
+    }
+
+    fun addObstacle(position: GridPosition) {
+        val obstacle = Obstacle(id = "B${nextObstacleNumber++}", position = position)
+        arena = arena.copy(obstacles = arena.obstacles + obstacle)
+    }
+
+    fun moveObstacle(id: String, position: GridPosition): Boolean {
+        if (!arena.contains(position)) return false
+
+        val obstacle = arena.obstacles.firstOrNull { it.id == id } ?: return false
+        val updated = obstacle.copy(position = position)
+        arena = arena.copy(obstacles = arena.obstacles.map { if (it.id == id) updated else it })
+        return true
+    }
+
+    fun confirmObstacle(id: String, position: GridPosition, direction: Direction): List<RobotCommand> {
+        if (!arena.contains(position)) return emptyList()
+
+        val obstacle = arena.obstacles.firstOrNull { it.id == id } ?: return emptyList()
+        val updated = obstacle.copy(position = position, facing = direction)
+        arena = arena.copy(obstacles = arena.obstacles.map { if (it.id == id) updated else it })
+        return listOf(
+            RobotCommand.AddObstacle(updated),
+            RobotCommand.FaceObstacle(id, direction),
+        )
+    }
+
+    fun removeObstacle(id: String): RobotCommand {
+        arena = arena.copy(obstacles = arena.obstacles.filterNot { it.id == id })
+        if (recognitionObstacleId == id) {
+            recognitionObstacleId = null
+            recognitionObstacleLocked = false
+        }
+        return RobotCommand.RemoveObstacle(id)
+    }
+
+    fun selectRecognitionObstacle(id: String) {
+        if (!recognitionObstacleLocked && arena.obstacles.any { it.id == id }) {
+            recognitionObstacleId = id
+        }
+    }
+
+    fun lockRecognitionObstacle(): RobotCommand? {
+        val obstacleId = recognitionObstacleId ?: return null
+        recognitionObstacleLocked = true
+        return RobotCommand.Raw("IMAGEOBSTACLE,$obstacleId")
+    }
+
+    fun unlockRecognitionObstacle(): RobotCommand {
+        recognitionObstacleLocked = false
+        return RobotCommand.Raw("IMAGEOBSTACLE,NONE")
+    }
+
+    fun faceObstacle(id: String, direction: Direction): RobotCommand {
+        arena = arena.copy(
+            obstacles = arena.obstacles.map {
+                if (it.id == id) it.copy(facing = direction) else it
+            },
+        )
+        return RobotCommand.FaceObstacle(id, direction)
+    }
+
+    fun targetObstacle(id: String, targetId: Int, direction: Direction): RobotCommand {
+        arena = arena.copy(
+            obstacles = arena.obstacles.map {
+                if (it.id == id) it.copy(targetId = targetId, facing = direction) else it
+            },
+        )
+        return RobotCommand.TargetObstacle(id, targetId, direction)
+    }
+
+    fun rawCommandOrNull(): RobotCommand? {
+        val value = rawCommand.trim()
+        if (value.isEmpty()) return null
+        rawCommand = ""
+        return RobotCommand.Raw(value)
+    }
+
+    fun recordSent(command: RobotCommand) {
+        commandLog = (commandLog + "TX ${formatter.format(command)}").takeLast(100)
+    }
+
+    fun applyIncoming(line: String) {
+        when (val command = parser.parse(line)) {
+            is RobotCommand.AddObstacle -> {
+                val others = arena.obstacles.filterNot { it.id == command.obstacle.id }
+                arena = arena.copy(obstacles = others + command.obstacle)
+                nextObstacleNumber = maxOf(nextObstacleNumber, command.obstacle.nextNumber())
+            }
+            is RobotCommand.RemoveObstacle -> {
+                arena = arena.copy(obstacles = arena.obstacles.filterNot { it.id == command.obstacleId })
+            }
+            is RobotCommand.FaceObstacle -> faceObstacle(command.obstacleId, command.direction)
+            is RobotCommand.SetObstacleTarget -> {
+                arena = arena.copy(
+                    obstacles = arena.obstacles.map {
+                        if (it.id == command.obstacleId) {
+                            it.copy(targetId = command.targetId)
+                        } else {
+                            it
+                        }
+                    },
+                )
+            }
+            is RobotCommand.TargetObstacle -> {
+                arena = arena.copy(
+                    obstacles = arena.obstacles.map {
+                        if (it.id == command.obstacleId) {
+                            it.copy(targetId = command.targetId, facing = command.direction)
+                        } else {
+                            it
+                        }
+                    },
+                )
+            }
+            is RobotCommand.SetRobotPose -> {
+                val robot = RobotState(command.position, command.direction)
+                if (arena.containsRobot(robot)) {
+                    arena = arena.copy(robot = robot)
+                    nanoFeedback = listOf(
+                        "Grid (${command.position.x}, ${command.position.y})  Facing ${command.direction}",
+                    )
+                }
+            }
+            else -> Unit
+        }
+    }
+
+    fun format(command: RobotCommand): String = formatter.format(command)
+
+    private fun moveRobotLocally(action: MovementAction): RobotState {
+        val robot = arena.robot
+        return when (action) {
+            MovementAction.Forward -> robot.copy(position = robot.position.step(robot.direction))
+            MovementAction.Backward -> robot.copy(position = robot.position.step(robot.direction.turnLeft().turnLeft()))
+            MovementAction.TurnLeft -> robot.copy(direction = robot.direction.turnLeft())
+            MovementAction.TurnRight -> robot.copy(direction = robot.direction.turnRight())
+            MovementAction.Stop -> robot
+        }.let { if (arena.containsRobot(it)) it else robot }
+    }
+
+    private fun GridPosition.step(direction: Direction): GridPosition = when (direction) {
+        Direction.N -> copy(y = y + 1)
+        Direction.E -> copy(x = x + 1)
+        Direction.S -> copy(y = y - 1)
+        Direction.W -> copy(x = x - 1)
+    }
+
+    private fun Obstacle.nextNumber(): Int {
+        return id.removePrefix("B").toIntOrNull()?.plus(1) ?: nextObstacleNumber
+    }
+}

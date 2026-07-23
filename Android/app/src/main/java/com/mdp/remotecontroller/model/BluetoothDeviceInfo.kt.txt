@@ -1,0 +1,6 @@
+package com.mdp.remotecontroller.model
+
+data class BluetoothDeviceInfo(
+    val name: String,
+    val address: String,
+)

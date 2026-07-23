@@ -1,0 +1,63 @@
+package com.mdp.remotecontroller.commandparser
+
+import com.mdp.remotecontroller.robot.RobotCommand
+import org.json.JSONArray
+import org.json.JSONObject
+
+class CommandFormatter {
+    fun format(command: RobotCommand): String = when (command) {
+        is RobotCommand.AddObstacle -> with(command.obstacle) {
+            "ADD,$id,(${position.x},${position.y})"
+        }
+        is RobotCommand.RemoveObstacle -> "SUB,${command.obstacleId}"
+        is RobotCommand.FaceObstacle -> "FACE,${command.obstacleId},${command.direction}"
+        is RobotCommand.TargetObstacle ->
+            "TARGET,${command.obstacleId},${command.targetId},${command.direction}"
+        is RobotCommand.SetObstacleTarget -> "TARGET,${command.obstacleId},${command.targetId}"
+        is RobotCommand.MoveRobot -> command.action.wireValue
+        is RobotCommand.AnalogDrive ->
+            "DRIVE,${command.speed.coerceIn(-1000, 1000)},${command.steering.coerceIn(-1000, 1000)}"
+        is RobotCommand.SendArena -> formatArena(command)
+        is RobotCommand.SetRobotPose ->
+            "ROBOT,(${command.position.x},${command.position.y}),${command.direction}"
+        is RobotCommand.Raw -> command.text.trim()
+    }
+
+    private fun formatArena(command: RobotCommand.SendArena): String {
+        val arena = command.arena
+        val robot = arena.robot
+        val obstacles = JSONArray()
+        arena.obstacles.sortedBy { it.id }.forEach { obstacle ->
+            obstacles.put(
+                JSONObject()
+                    .put("id", obstacle.id)
+                    .put("x", obstacle.position.x)
+                    .put("y", obstacle.position.y)
+                    .put("direction", obstacle.facing.name)
+                    .put("targetId", obstacle.targetId ?: JSONObject.NULL),
+            )
+        }
+
+        return JSONObject()
+            .put("version", 1)
+            .put("type", "arena")
+            .put("revision", command.revision)
+            .put(
+                "grid",
+                JSONObject()
+                    .put("columns", arena.columns)
+                    .put("rows", arena.rows)
+                    .put("cellCm", 10)
+                    .put("origin", "bottom-left"),
+            )
+            .put(
+                "robot",
+                JSONObject()
+                    .put("x", robot.position.x)
+                    .put("y", robot.position.y)
+                    .put("direction", robot.direction.name),
+            )
+            .put("obstacles", obstacles)
+            .toString()
+    }
+}

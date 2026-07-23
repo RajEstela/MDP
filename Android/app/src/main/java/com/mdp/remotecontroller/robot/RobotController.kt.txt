@@ -1,0 +1,13 @@
+package com.mdp.remotecontroller.robot
+
+import com.mdp.remotecontroller.bluetooth.BluetoothSerialService
+import com.mdp.remotecontroller.commandparser.CommandFormatter
+
+class RobotController(
+    private val bluetoothSerialService: BluetoothSerialService,
+    private val formatter: CommandFormatter = CommandFormatter(),
+) {
+    suspend fun send(command: RobotCommand) {
+        bluetoothSerialService.send(formatter.format(command))
+    }
+}

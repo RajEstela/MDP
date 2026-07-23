@@ -1,0 +1,9 @@
+package com.mdp.remotecontroller.robot
+
+enum class MovementAction(val wireValue: String) {
+    Forward("FW010"),
+    Backward("BW010"),
+    TurnLeft("LEFT"),
+    TurnRight("RIGHT"),
+    Stop("STOP"),
+}

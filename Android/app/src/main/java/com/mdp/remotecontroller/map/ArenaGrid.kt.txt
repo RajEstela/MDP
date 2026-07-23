@@ -1,0 +1,239 @@
+package com.mdp.remotecontroller.map
+
+import android.graphics.Paint
+import android.graphics.Typeface
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
+import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.nativeCanvas
+import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.unit.dp
+import com.mdp.remotecontroller.model.ArenaState
+import com.mdp.remotecontroller.model.Direction
+import com.mdp.remotecontroller.model.GridPosition
+import com.mdp.remotecontroller.model.Obstacle
+import com.mdp.remotecontroller.model.RobotState
+import kotlin.math.floor
+import kotlin.math.min
+
+@Composable
+fun ArenaGrid(
+    arena: ArenaState,
+    onObstacleAdded: (GridPosition) -> Unit,
+    onObstacleMoved: (String, GridPosition) -> Unit,
+    onObstacleRemoved: (String) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    var draggingId by remember { mutableStateOf<String?>(null) }
+    var dragCell by remember { mutableStateOf<GridPosition?>(null) }
+
+    Canvas(
+        modifier = modifier
+            .fillMaxWidth()
+            .aspectRatio(arena.columns.toFloat() / arena.rows.toFloat())
+            .pointerInput(arena) {
+                detectTapGestures { offset ->
+                    val cell = offset.toGridPositionOrNull(
+                        width = size.width.toFloat(),
+                        height = size.height.toFloat(),
+                        arena = arena,
+                    ) ?: return@detectTapGestures
+                    val isOccupied = arena.obstacles.any { it.position == cell } ||
+                        arena.robot.occupies(cell)
+                    if (!isOccupied) {
+                        onObstacleAdded(cell)
+                    }
+                }
+            }
+            .pointerInput(arena) {
+                detectDragGestures(
+                    onDragStart = { offset ->
+                        val cell = offset.toGridPositionOrNull(size.width.toFloat(), size.height.toFloat(), arena)
+                        draggingId = arena.obstacles.firstOrNull { it.position == cell }?.id
+                        dragCell = cell
+                    },
+                    onDrag = { change, _ ->
+                        dragCell = change.position.toGridPositionOrNull(
+                            width = size.width.toFloat(),
+                            height = size.height.toFloat(),
+                            arena = arena,
+                        )
+                    },
+                    onDragEnd = {
+                        val id = draggingId
+                        val cell = dragCell
+                        if (id != null && cell != null) {
+                            onObstacleMoved(id, cell)
+                        } else if (id != null) {
+                            onObstacleRemoved(id)
+                        }
+                        draggingId = null
+                        dragCell = null
+                    },
+                    onDragCancel = {
+                        draggingId = null
+                        dragCell = null
+                    },
+                )
+            },
+    ) {
+        val cell = min(size.width / arena.columns, size.height / arena.rows)
+        val boardWidth = cell * arena.columns
+        val boardHeight = cell * arena.rows
+
+        drawRect(Color(0xFFFAFAF7), size = Size(boardWidth, boardHeight))
+        drawGrid(arena, cell, boardWidth, boardHeight)
+        arena.obstacles.forEach { obstacle ->
+            val position = if (obstacle.id == draggingId) dragCell else obstacle.position
+            position?.let {
+                drawObstacle(obstacle.copy(position = it), cell, arena.rows)
+            }
+        }
+        drawRobot(arena.robot.position, arena.robot.direction, cell, arena.rows)
+    }
+}
+
+private fun DrawScope.drawGrid(
+    arena: ArenaState,
+    cell: Float,
+    boardWidth: Float,
+    boardHeight: Float,
+) {
+    val line = Color(0xFFD4D4C8)
+    repeat(arena.columns + 1) { column ->
+        val x = column * cell
+        drawLine(line, start = Offset(x, 0f), end = Offset(x, boardHeight), strokeWidth = 1.dp.toPx())
+    }
+    repeat(arena.rows + 1) { row ->
+        val y = row * cell
+        drawLine(line, start = Offset(0f, y), end = Offset(boardWidth, y), strokeWidth = 1.dp.toPx())
+    }
+}
+
+private fun DrawScope.drawObstacle(obstacle: Obstacle, cell: Float, rows: Int) {
+    val topLeft = obstacle.position.toTopLeft(cell, rows)
+    drawRect(
+        color = Color(0xFF374151),
+        topLeft = topLeft + Offset(cell * 0.12f, cell * 0.12f),
+        size = Size(cell * 0.76f, cell * 0.76f),
+    )
+    drawDirectionMark(
+        center = topLeft + Offset(cell / 2f, cell / 2f),
+        direction = obstacle.facing,
+        radius = cell * 0.26f,
+        color = Color(0xFFFACC15),
+    )
+    drawObstacleLabel(
+        label = obstacle.targetId?.toString() ?: obstacle.id,
+        center = topLeft + Offset(cell / 2f, cell / 2f),
+        cell = cell,
+    )
+}
+
+private fun DrawScope.drawObstacleLabel(label: String, center: Offset, cell: Float) {
+    val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.White.toArgb()
+        textAlign = Paint.Align.CENTER
+        textSize = cell * 0.34f
+        typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+    }
+    val baseline = center.y - (paint.descent() + paint.ascent()) / 2f
+    drawIntoCanvas { canvas ->
+        canvas.nativeCanvas.drawText(label, center.x, baseline, paint)
+    }
+}
+
+private fun DrawScope.drawRobot(position: GridPosition, direction: Direction, cell: Float, rows: Int) {
+    val footprint = RobotState.FOOTPRINT_CELLS
+    val halfFootprint = footprint / 2
+    val topLeft = GridPosition(
+        x = position.x - halfFootprint,
+        y = position.y + halfFootprint,
+    ).toTopLeft(cell, rows)
+    val robotSize = cell * footprint
+    drawRoundRect(
+        color = Color(0xFF0F766E),
+        topLeft = topLeft + Offset(cell * 0.08f, cell * 0.08f),
+        size = Size(robotSize - cell * 0.16f, robotSize - cell * 0.16f),
+        cornerRadius = androidx.compose.ui.geometry.CornerRadius(cell * 0.12f),
+    )
+    drawDirectionMark(
+        center = topLeft + Offset(robotSize / 2f, robotSize / 2f),
+        direction = direction,
+        radius = cell * 0.82f,
+        color = Color.White,
+    )
+}
+
+private fun DrawScope.drawDirectionMark(
+    center: Offset,
+    direction: Direction,
+    radius: Float,
+    color: Color,
+) {
+    val path = Path()
+    val points = when (direction) {
+        Direction.N -> listOf(
+            Offset(center.x, center.y - radius),
+            Offset(center.x - radius * 0.7f, center.y + radius * 0.6f),
+            Offset(center.x + radius * 0.7f, center.y + radius * 0.6f),
+        )
+        Direction.E -> listOf(
+            Offset(center.x + radius, center.y),
+            Offset(center.x - radius * 0.6f, center.y - radius * 0.7f),
+            Offset(center.x - radius * 0.6f, center.y + radius * 0.7f),
+        )
+        Direction.S -> listOf(
+            Offset(center.x, center.y + radius),
+            Offset(center.x - radius * 0.7f, center.y - radius * 0.6f),
+            Offset(center.x + radius * 0.7f, center.y - radius * 0.6f),
+        )
+        Direction.W -> listOf(
+            Offset(center.x - radius, center.y),
+            Offset(center.x + radius * 0.6f, center.y - radius * 0.7f),
+            Offset(center.x + radius * 0.6f, center.y + radius * 0.7f),
+        )
+    }
+    path.moveTo(points[0].x, points[0].y)
+    path.lineTo(points[1].x, points[1].y)
+    path.lineTo(points[2].x, points[2].y)
+    path.close()
+    drawPath(path, color)
+    drawCircle(color, radius = radius, center = center, style = Stroke(width = 1.dp.toPx()))
+}
+
+private fun Offset.toGridPositionOrNull(width: Float, height: Float, arena: ArenaState): GridPosition? {
+    val cell = min(width / arena.columns, height / arena.rows)
+    val boardWidth = cell * arena.columns
+    val boardHeight = cell * arena.rows
+    if (x < 0f || y < 0f || x >= boardWidth || y >= boardHeight) return null
+
+    val column = floor(x / cell).toInt()
+    val rowFromTop = floor(y / cell).toInt()
+    return GridPosition(x = column, y = arena.rows - 1 - rowFromTop)
+}
+
+private fun GridPosition.toTopLeft(cell: Float, rows: Int): Offset =
+    Offset(x = x * cell, y = (rows - 1 - y) * cell)
+
+private fun RobotState.occupies(cell: GridPosition): Boolean {
+    val halfFootprint = RobotState.FOOTPRINT_CELLS / 2
+    return cell.x in (position.x - halfFootprint)..(position.x + halfFootprint) &&
+        cell.y in (position.y - halfFootprint)..(position.y + halfFootprint)
+}

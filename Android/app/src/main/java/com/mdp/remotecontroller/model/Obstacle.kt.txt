@@ -1,0 +1,8 @@
+package com.mdp.remotecontroller.model
+
+data class Obstacle(
+    val id: String,
+    val position: GridPosition,
+    val facing: Direction = Direction.N,
+    val targetId: Int? = null,
+)

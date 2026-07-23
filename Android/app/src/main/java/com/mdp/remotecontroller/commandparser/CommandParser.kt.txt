@@ -1,0 +1,96 @@
+package com.mdp.remotecontroller.commandparser
+
+import com.mdp.remotecontroller.model.Direction
+import com.mdp.remotecontroller.model.GridPosition
+import com.mdp.remotecontroller.model.Obstacle
+import com.mdp.remotecontroller.robot.RobotCommand
+
+class CommandParser {
+    private val addRegex = Regex("""^ADD,([^,]+),\((\d+),(\d+)\)$""")
+    private val robotRegex = Regex("""^ROBOT,\((\d+),(\d+)\),([NESW])$""")
+    private val robotSimpleRegex = Regex("""^ROBOT,\s*(\d+),\s*(\d+),\s*([NESW])$""")
+    private val robotPositionRegex = Regex("""^ROBOTPOSITION:\s*(\d+),\s*(\d+),\s*(\d+)$""")
+    private val robotPositionJsonRegex = Regex(
+        """"robotPosition"\s*:\s*\[\s*(\d+),\s*(\d+),\s*(\d+)\s*]""",
+    )
+
+    fun parse(input: String): RobotCommand {
+        val text = input.trim()
+        addRegex.matchEntire(text)?.let { match ->
+            val (id, x, y) = match.destructured
+            return RobotCommand.AddObstacle(
+                Obstacle(id = id, position = GridPosition(x.toInt(), y.toInt())),
+            )
+        }
+
+        robotRegex.matchEntire(text)?.let { match ->
+            val (x, y, direction) = match.destructured
+            return RobotCommand.SetRobotPose(
+                position = GridPosition(x.toInt(), y.toInt()),
+                direction = Direction.valueOf(direction),
+            )
+        }
+
+        robotSimpleRegex.matchEntire(text)?.let { match ->
+            val (x, y, direction) = match.destructured
+            return RobotCommand.SetRobotPose(
+                position = GridPosition(x.toInt(), y.toInt()),
+                direction = Direction.valueOf(direction),
+            )
+        }
+
+        robotPositionRegex.matchEntire(text)?.let { match ->
+            val (x, y, angle) = match.destructured
+            return RobotCommand.SetRobotPose(
+                position = GridPosition(x.toInt(), y.toInt()),
+                direction = angle.toInt().toDirection(),
+            )
+        }
+
+        robotPositionJsonRegex.find(text)?.let { match ->
+            val (x, y, angle) = match.destructured
+            return RobotCommand.SetRobotPose(
+                position = GridPosition(x.toInt(), y.toInt()),
+                direction = angle.toInt().toDirection(),
+            )
+        }
+
+        val parts = text.split(",")
+        return when (parts.firstOrNull()) {
+            "DRIVE" if parts.size == 3 -> RobotCommand.AnalogDrive(
+                speed = parts[1].toInt().coerceIn(-1000, 1000),
+                steering = parts[2].toInt().coerceIn(-1000, 1000),
+            )
+            "SUB" if parts.size == 2 -> RobotCommand.RemoveObstacle(parts[1])
+            "FACE" if parts.size == 3 -> RobotCommand.FaceObstacle(
+                obstacleId = parts[1],
+                direction = Direction.valueOf(parts[2]),
+            )
+            "TARGET" if parts.size == 4 -> RobotCommand.TargetObstacle(
+                obstacleId = parts[1].toObstacleId(),
+                targetId = parts[2].toInt(),
+                direction = Direction.valueOf(parts[3]),
+            )
+            "TARGET" if parts.size == 3 -> RobotCommand.SetObstacleTarget(
+                obstacleId = parts[1].toObstacleId(),
+                targetId = parts[2].toInt(),
+            )
+            else -> RobotCommand.Raw(text)
+        }
+    }
+
+    private fun Int.toDirection(): Direction {
+        return when (Math.floorMod(this, 360)) {
+            0 -> Direction.N
+            90 -> Direction.E
+            180 -> Direction.S
+            270 -> Direction.W
+            else -> Direction.N
+        }
+    }
+
+    private fun String.toObstacleId(): String {
+        val value = trim()
+        return if (value.startsWith("B", ignoreCase = true)) value.uppercase() else "B$value"
+    }
+}

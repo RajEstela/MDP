@@ -1,0 +1,412 @@
+package com.mdp.remotecontroller.bluetooth
+
+import android.Manifest
+import android.annotation.SuppressLint
+import android.bluetooth.BluetoothAdapter
+import android.bluetooth.BluetoothDevice
+import android.bluetooth.BluetoothManager
+import android.bluetooth.BluetoothSocket
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
+import android.content.pm.PackageManager
+import android.os.Build
+import androidx.core.content.ContextCompat
+import com.mdp.remotecontroller.model.BluetoothDeviceInfo
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
+import java.util.UUID
+
+class BluetoothSerialService(
+    private val context: Context,
+    private val scope: CoroutineScope,
+) {
+    private val adapter: BluetoothAdapter? =
+        context.getSystemService(BluetoothManager::class.java)?.adapter
+
+    private var socket: BluetoothSocket? = null
+    private var readerJob: Job? = null
+    private var reconnectJob: Job? = null
+    private var targetAddress: String? = null
+    private var manualDisconnectRequested = false
+    private var receiverRegistered = false
+    private var incomingBuffer = ""
+    private val writeMutex = Mutex()
+    var messageTerminator: MessageTerminator = MessageTerminator.NewLine
+
+    private val discoveryReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            when (intent.action) {
+                BluetoothDevice.ACTION_FOUND -> {
+                    val device = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                        intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE, BluetoothDevice::class.java)
+                    } else {
+                        @Suppress("DEPRECATION")
+                        intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE)
+                    } ?: return
+
+                    if (!hasConnectPermission()) return
+
+                    @SuppressLint("MissingPermission")
+                    val deviceInfo = device.toInfo()
+                    _state.update { current ->
+                        val devices = (current.availableDevices + deviceInfo)
+                            .distinctBy { it.address }
+                            .sortedBy { it.name }
+                        current.copy(availableDevices = devices)
+                    }
+                }
+                BluetoothAdapter.ACTION_DISCOVERY_FINISHED -> {
+                    _state.update { it.copy(isDiscovering = false) }
+                }
+                BluetoothAdapter.ACTION_DISCOVERY_STARTED -> {
+                    _state.update { it.copy(isDiscovering = true, error = null) }
+                }
+            }
+        }
+    }
+
+    private val _state = MutableStateFlow(BluetoothConnectionState())
+    val state: StateFlow<BluetoothConnectionState> = _state
+
+    fun refreshPairedDevices() {
+        if (!hasConnectPermission()) {
+            _state.update { it.copy(error = "Bluetooth permission is required") }
+            return
+        }
+
+        @SuppressLint("MissingPermission")
+        val devices = adapter?.bondedDevices.orEmpty().map { it.toInfo() }
+        _state.update { it.copy(pairedDevices = devices, error = null) }
+    }
+
+    @SuppressLint("MissingPermission")
+    fun startDeviceScan() {
+        if (!hasScanPermission() || !hasConnectPermission()) {
+            _state.update { it.copy(error = "Bluetooth scan permission is required") }
+            return
+        }
+
+        val bluetoothAdapter = adapter ?: run {
+            _state.update { it.copy(error = "Bluetooth adapter is unavailable") }
+            return
+        }
+        if (!bluetoothAdapter.isEnabled) {
+            _state.update { it.copy(error = "Turn on Bluetooth before scanning") }
+            return
+        }
+
+        refreshPairedDevices()
+        registerDiscoveryReceiver()
+
+        scope.launch {
+            runCatching {
+                startDiscovery(bluetoothAdapter)
+            }.onFailure { throwable ->
+                _state.update {
+                    it.copy(
+                        isDiscovering = false,
+                        error = throwable.message ?: "Unable to scan for Bluetooth devices",
+                    )
+                }
+            }
+        }
+    }
+
+    @SuppressLint("MissingPermission")
+    private suspend fun startDiscovery(bluetoothAdapter: BluetoothAdapter) {
+        withContext(Dispatchers.Main) {
+            if (bluetoothAdapter.isDiscovering) {
+                bluetoothAdapter.cancelDiscovery()
+                delay(600)
+            }
+            _state.update { current ->
+                current.copy(
+                    availableDevices = current.pairedDevices,
+                    isDiscovering = true,
+                    error = null,
+                )
+            }
+            if (!bluetoothAdapter.startDiscovery()) {
+                delay(600)
+                val retryStarted = bluetoothAdapter.startDiscovery()
+                if (!retryStarted) {
+                    _state.update {
+                        it.copy(
+                            isDiscovering = false,
+                            error = "Bluetooth discovery did not start. Open Bluetooth settings, confirm Location is on, then tap scan again.",
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    suspend fun connect(address: String) {
+        if (!hasConnectPermission()) {
+            _state.update { it.copy(error = "Bluetooth permission is required") }
+            return
+        }
+
+        manualDisconnectRequested = false
+        targetAddress = address
+        reconnectJob?.cancel()
+        reconnectJob = null
+        closeSocket(cancelReader = true)
+        _state.update { it.copy(isConnecting = true, error = null) }
+
+        runCatching { connectSocket(address) }.onFailure { throwable ->
+            _state.update {
+                it.copy(
+                    connectedDevice = null,
+                    isConnecting = false,
+                    error = buildConnectError(throwable),
+                )
+            }
+            scheduleReconnect("Initial connection failed: ${throwable.message ?: "socket unavailable"}")
+        }
+    }
+
+    suspend fun send(message: String) {
+        val activeSocket = socket ?: run {
+            _state.update { it.copy(error = "No Bluetooth device connected") }
+            return
+        }
+
+        runCatching {
+            writeMutex.withLock {
+                withContext(Dispatchers.IO) {
+                    activeSocket.outputStream.write((message.trim() + messageTerminator.suffix).toByteArray())
+                    activeSocket.outputStream.flush()
+                }
+            }
+        }.onFailure { throwable ->
+            markDisconnected(
+                message = "Bluetooth send failed: ${throwable.message ?: "socket closed"}",
+                shouldReconnect = true,
+            )
+        }
+    }
+
+    fun disconnect() {
+        manualDisconnectRequested = true
+        targetAddress = null
+        reconnectJob?.cancel()
+        reconnectJob = null
+        closeSocket(cancelReader = true)
+        _state.update {
+            it.copy(
+                connectedDevice = null,
+                isConnecting = false,
+                isAutoReconnecting = false,
+            )
+        }
+    }
+
+    fun close() {
+        disconnect()
+        @SuppressLint("MissingPermission")
+        runCatching { adapter?.cancelDiscovery() }
+        if (receiverRegistered) {
+            runCatching { context.unregisterReceiver(discoveryReceiver) }
+            receiverRegistered = false
+        }
+    }
+
+    private fun startReader(activeSocket: BluetoothSocket) {
+        readerJob?.cancel()
+        incomingBuffer = ""
+        readerJob = scope.launch(Dispatchers.IO) {
+            runCatching {
+                val buffer = ByteArray(1024)
+                while (true) {
+                    val bytesRead = activeSocket.inputStream.read(buffer)
+                    if (bytesRead == -1) {
+                        markDisconnected(
+                            message = "Bluetooth disconnected by robot",
+                            shouldReconnect = true,
+                            cancelReader = false,
+                        )
+                        return@launch
+                    }
+                    val incoming = buffer.decodeToString(endIndex = bytesRead)
+                    recordReceivedMessages(incoming)
+                }
+            }.onFailure { throwable ->
+                if (!manualDisconnectRequested) {
+                    markDisconnected(
+                        message = "Bluetooth read failed: ${throwable.message ?: "socket closed"}",
+                        shouldReconnect = true,
+                        cancelReader = false,
+                    )
+                }
+            }
+        }
+    }
+
+    @SuppressLint("MissingPermission")
+    private suspend fun connectSocket(address: String) {
+        withContext(Dispatchers.IO) {
+            val bluetoothAdapter = adapter ?: error("Bluetooth adapter is unavailable")
+            val device = bluetoothAdapter.getRemoteDevice(address)
+            val newSocket = device.createRfcommSocketToServiceRecord(SPP_UUID)
+            bluetoothAdapter.cancelDiscovery()
+            newSocket.connect()
+            socket = newSocket
+            _state.update {
+                it.copy(
+                    connectedDevice = device.toInfo(),
+                    isDiscovering = false,
+                    isConnecting = false,
+                    isAutoReconnecting = false,
+                    error = null,
+                )
+            }
+            startReader(newSocket)
+        }
+    }
+
+    private fun recordReceivedMessages(incoming: String) {
+        incomingBuffer += incoming
+        val parts = incomingBuffer.split('\n')
+        incomingBuffer = parts.last()
+        val messages = parts
+            .dropLast(1)
+            .map { it.trimEnd('\r').trim() }
+            .filter { it.isNotEmpty() }
+        if (messages.isEmpty()) return
+
+        _state.update { current ->
+            current.copy(
+                receivedMessages = (current.receivedMessages + messages).takeLast(100),
+                receivedMessageCount = current.receivedMessageCount + messages.size,
+            )
+        }
+    }
+
+    private fun markDisconnected(
+        message: String,
+        shouldReconnect: Boolean,
+        cancelReader: Boolean = true,
+    ) {
+        closeSocket(cancelReader = cancelReader)
+        _state.update {
+            it.copy(
+                connectedDevice = null,
+                isConnecting = false,
+                error = message,
+            )
+        }
+        if (shouldReconnect) {
+            scheduleReconnect(message)
+        }
+    }
+
+    private fun closeSocket(cancelReader: Boolean) {
+        if (cancelReader) {
+            readerJob?.cancel()
+        }
+        readerJob = null
+        runCatching { socket?.close() }
+        socket = null
+    }
+
+    private fun scheduleReconnect(reason: String) {
+        val address = targetAddress ?: return
+        if (manualDisconnectRequested || reconnectJob?.isActive == true) return
+
+        reconnectJob = scope.launch(Dispatchers.IO) {
+            var delayMs = RECONNECT_INITIAL_DELAY_MS
+            while (!manualDisconnectRequested && targetAddress == address) {
+                _state.update {
+                    it.copy(
+                        connectedDevice = null,
+                        isConnecting = false,
+                        isAutoReconnecting = true,
+                        error = "$reason. Reconnecting...",
+                    )
+                }
+                delay(delayMs)
+                if (manualDisconnectRequested || targetAddress != address) break
+
+                runCatching {
+                    closeSocket(cancelReader = true)
+                    connectSocket(address)
+                }.onSuccess {
+                    return@launch
+                }.onFailure { throwable ->
+                    delayMs = (delayMs * 2).coerceAtMost(RECONNECT_MAX_DELAY_MS)
+                    _state.update {
+                        it.copy(
+                            connectedDevice = null,
+                            isConnecting = false,
+                            isAutoReconnecting = true,
+                            error = "Reconnect failed: ${throwable.message ?: "socket unavailable"}. Retrying...",
+                        )
+                    }
+                }
+            }
+
+            _state.update { it.copy(isAutoReconnecting = false) }
+        }
+    }
+
+    private fun hasConnectPermission(): Boolean {
+        return Build.VERSION.SDK_INT < Build.VERSION_CODES.S ||
+            ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.BLUETOOTH_CONNECT,
+            ) == PackageManager.PERMISSION_GRANTED
+    }
+
+    private fun hasScanPermission(): Boolean {
+        val permission = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            Manifest.permission.BLUETOOTH_SCAN
+        } else {
+            Manifest.permission.ACCESS_FINE_LOCATION
+        }
+        return ContextCompat.checkSelfPermission(context, permission) == PackageManager.PERMISSION_GRANTED
+    }
+
+    private fun registerDiscoveryReceiver() {
+        if (receiverRegistered) return
+
+        val filter = IntentFilter().apply {
+            addAction(BluetoothDevice.ACTION_FOUND)
+            addAction(BluetoothAdapter.ACTION_DISCOVERY_STARTED)
+            addAction(BluetoothAdapter.ACTION_DISCOVERY_FINISHED)
+        }
+        ContextCompat.registerReceiver(
+            context,
+            discoveryReceiver,
+            filter,
+            ContextCompat.RECEIVER_NOT_EXPORTED,
+        )
+        receiverRegistered = true
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun BluetoothDevice.toInfo(): BluetoothDeviceInfo =
+        BluetoothDeviceInfo(name = name ?: "Unknown device", address = address)
+
+    private fun buildConnectError(throwable: Throwable): String {
+        val detail = throwable.message ?: "Unable to connect"
+        return "$detail. Select a robot Bluetooth serial/SPP device such as HC-05/HC-06/ESP32 Classic; iPhone and BLE-only devices will not work with this serial socket."
+    }
+
+    companion object {
+        private const val RECONNECT_INITIAL_DELAY_MS = 1_000L
+        private const val RECONNECT_MAX_DELAY_MS = 8_000L
+        private val SPP_UUID: UUID = UUID.fromString("00001101-0000-1000-8000-00805F9B34FB")
+    }
+}
